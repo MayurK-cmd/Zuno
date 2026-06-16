@@ -1,0 +1,666 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `C:\Users\mayur\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\soroban-env-host-22.1.3\src\host\metered_clone.rs`."><title>metered_clone.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-77263533.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="soroban_env_host" data-themes="" data-resource-suffix="" data-rustdoc-version="1.94.1 (e408947bf 2026-03-25)" data-channel="1.94.1" data-search-js="search-9e2438ea.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-c38705f0.js" ><script src="../../../static.files/storage-e2aeef58.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-7bab91a1.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-ffcac47a.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">soroban_env_host\host/</div>metered_clone.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Functions to support measurement of the cost of cloning (and allocating)
+<a href=#2 id=2 data-nosnippet>2</a>//! objects that may contain pointers into the heap.
+<a href=#3 id=3 data-nosnippet>3</a>//!
+<a href=#4 id=4 data-nosnippet>4</a>//! Note that in this file the term "substructure" refers to the presence of
+<a href=#5 id=5 data-nosnippet>5</a>//! _pointers to owned data_ in a type, such that "merely counting the size" of
+<a href=#6 id=6 data-nosnippet>6</a>//! the type fails to capture the cost of cloning it. For example a struct with
+<a href=#7 id=7 data-nosnippet>7</a>//! 10 `Option&lt;i32&gt;` fields has "no substructure", because counting the size of
+<a href=#8 id=8 data-nosnippet>8</a>//! the struct gives you the right cost of cloning it; whereas a struct with
+<a href=#9 id=9 data-nosnippet>9</a>//! even one `Vec&lt;u8&gt;` is considered to "have substructure" because the struct's
+<a href=#10 id=10 data-nosnippet>10</a>//! size is just the fixed size of the vector header, and fails to account to
+<a href=#11 id=11 data-nosnippet>11</a>//! the owned heap allocation that the `Vec` _points to_, and that will be
+<a href=#12 id=12 data-nosnippet>12</a>//! cloned anytime we clone the struct.
+<a href=#13 id=13 data-nosnippet>13</a>//!
+<a href=#14 id=14 data-nosnippet>14</a>//! Consequently in methods where we "charge for the substructure" we are only
+<a href=#15 id=15 data-nosnippet>15</a>//! concerned with visiting any fields that (transitively) contain owning
+<a href=#16 id=16 data-nosnippet>16</a>//! pointers. The rest of each struct is considered its "shallow" part and
+<a href=#17 id=17 data-nosnippet>17</a>//! charged based on its declared size (see [`DeclaredSizeForMetering`]).
+<a href=#18 id=18 data-nosnippet>18</a>
+<a href=#19 id=19 data-nosnippet>19</a></span><span class="kw">use </span>std::{cell::RefCell, mem, rc::Rc};
+<a href=#20 id=20 data-nosnippet>20</a>
+<a href=#21 id=21 data-nosnippet>21</a><span class="kw">use </span>crate::{
+<a href=#22 id=22 data-nosnippet>22</a>    budget::{AsBudget, DepthLimiter},
+<a href=#23 id=23 data-nosnippet>23</a>    builtin_contracts::base_types::Address,
+<a href=#24 id=24 data-nosnippet>24</a>    storage::AccessType,
+<a href=#25 id=25 data-nosnippet>25</a>    xdr::{
+<a href=#26 id=26 data-nosnippet>26</a>        AccountEntry, AccountId, Asset, BytesM, ContractCodeCostInputs, ContractCodeEntry,
+<a href=#27 id=27 data-nosnippet>27</a>        ContractCodeEntryExt, ContractCodeEntryV1, ContractCostType, ContractExecutable,
+<a href=#28 id=28 data-nosnippet>28</a>        ContractIdPreimage, CreateContractArgs, CreateContractArgsV2, Duration, Hash,
+<a href=#29 id=29 data-nosnippet>29</a>        InvokeContractArgs, LedgerEntry, LedgerEntryData, LedgerEntryExt, LedgerKey,
+<a href=#30 id=30 data-nosnippet>30</a>        LedgerKeyAccount, LedgerKeyContractCode, LedgerKeyTrustLine, PublicKey, ScAddress, ScBytes,
+<a href=#31 id=31 data-nosnippet>31</a>        ScContractInstance, ScErrorCode, ScErrorType, ScMap, ScMapEntry, ScNonceKey, ScString,
+<a href=#32 id=32 data-nosnippet>32</a>        ScSymbol, ScVal, ScVec, Signer, SorobanAuthorizationEntry, SorobanAuthorizedFunction,
+<a href=#33 id=33 data-nosnippet>33</a>        SorobanAuthorizedInvocation, StringM, TimePoint, TrustLineAsset, TrustLineEntry, Uint256,
+<a href=#34 id=34 data-nosnippet>34</a>    },
+<a href=#35 id=35 data-nosnippet>35</a>    AddressObject, Bool, BytesObject, DurationObject, DurationSmall, DurationVal, Error, HostError,
+<a href=#36 id=36 data-nosnippet>36</a>    I128Object, I128Small, I128Val, I256Object, I256Small, I256Val, I32Val, I64Object, I64Small,
+<a href=#37 id=37 data-nosnippet>37</a>    I64Val, MapObject, Object, ScValObject, StringObject, Symbol, SymbolObject, SymbolSmall,
+<a href=#38 id=38 data-nosnippet>38</a>    SymbolSmallIter, SymbolStr, TimepointObject, TimepointSmall, TimepointVal, U128Object,
+<a href=#39 id=39 data-nosnippet>39</a>    U128Small, U128Val, U256Object, U256Small, U256Val, U32Val, U64Object, U64Small, U64Val, Val,
+<a href=#40 id=40 data-nosnippet>40</a>    VecObject, Void, I256, U256,
+<a href=#41 id=41 data-nosnippet>41</a>};
+<a href=#42 id=42 data-nosnippet>42</a>
+<a href=#43 id=43 data-nosnippet>43</a><span class="kw">use </span><span class="kw">super</span>::declared_size::DeclaredSizeForMetering;
+<a href=#44 id=44 data-nosnippet>44</a>
+<a href=#45 id=45 data-nosnippet>45</a><span class="doccomment">/// Charge for an N-element "shallow copy" of some type, not cloning any substructure. The charge
+<a href=#46 id=46 data-nosnippet>46</a>/// unit is number of elements `n_elts` multiplied by a declared size of each element. In a better
+<a href=#47 id=47 data-nosnippet>47</a>/// world we would multiply by `size_of&lt;Self&gt;` instead but that's not guaranteed to be stable, which
+<a href=#48 id=48 data-nosnippet>48</a>/// might cause metering to differ across compilations, causing problems in concensus and replay.
+<a href=#49 id=49 data-nosnippet>49</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>charge_shallow_copy&lt;T: DeclaredSizeForMetering&gt;(
+<a href=#50 id=50 data-nosnippet>50</a>    n_elts: u64,
+<a href=#51 id=51 data-nosnippet>51</a>    budget: <span class="kw">impl </span>AsBudget,
+<a href=#52 id=52 data-nosnippet>52</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#53 id=53 data-nosnippet>53</a>    <span class="comment">// Ideally we would want a static assertion. However, it does not work due to rust restrictions
+<a href=#54 id=54 data-nosnippet>54</a>    // (e.g. see https://github.com/rust-lang/rust/issues/57775). Here we make a runtime assertion
+<a href=#55 id=55 data-nosnippet>55</a>    // that the type's size is below its promised element size for budget charging. This assertion
+<a href=#56 id=56 data-nosnippet>56</a>    // only happens in debug build. In optimized build, not satisfying the asserted condition just
+<a href=#57 id=57 data-nosnippet>57</a>    // means an underestimation of the cost.
+<a href=#58 id=58 data-nosnippet>58</a>    </span><span class="macro">debug_assert!</span>(
+<a href=#59 id=59 data-nosnippet>59</a>        mem::size_of::&lt;T&gt;() <span class="kw">as </span>u64 &lt;= T::DECLARED_SIZE,
+<a href=#60 id=60 data-nosnippet>60</a>        <span class="string">"mem size: {}, declared: {}"</span>,
+<a href=#61 id=61 data-nosnippet>61</a>        std::mem::size_of::&lt;T&gt;(),
+<a href=#62 id=62 data-nosnippet>62</a>        T::DECLARED_SIZE
+<a href=#63 id=63 data-nosnippet>63</a>    );
+<a href=#64 id=64 data-nosnippet>64</a>    budget.as_budget().charge(
+<a href=#65 id=65 data-nosnippet>65</a>        ContractCostType::MemCpy,
+<a href=#66 id=66 data-nosnippet>66</a>        <span class="prelude-val">Some</span>(n_elts.saturating_mul(T::DECLARED_SIZE)),
+<a href=#67 id=67 data-nosnippet>67</a>    )
+<a href=#68 id=68 data-nosnippet>68</a>}
+<a href=#69 id=69 data-nosnippet>69</a>
+<a href=#70 id=70 data-nosnippet>70</a><span class="comment">// Let it be a free function instead of a trait because charge_heap_alloc maybe called elsewhere,
+<a href=#71 id=71 data-nosnippet>71</a>// not just metered clone, e.g. Box::&lt;T&gt;::new().
+<a href=#72 id=72 data-nosnippet>72</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>charge_heap_alloc&lt;T: DeclaredSizeForMetering&gt;(
+<a href=#73 id=73 data-nosnippet>73</a>    n_elts: u64,
+<a href=#74 id=74 data-nosnippet>74</a>    budget: <span class="kw">impl </span>AsBudget,
+<a href=#75 id=75 data-nosnippet>75</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#76 id=76 data-nosnippet>76</a>    <span class="comment">// Here we make a runtime assertion that the type's size is below its promised element size for
+<a href=#77 id=77 data-nosnippet>77</a>    // budget charging.
+<a href=#78 id=78 data-nosnippet>78</a>    </span><span class="macro">debug_assert!</span>(
+<a href=#79 id=79 data-nosnippet>79</a>        mem::size_of::&lt;T&gt;() <span class="kw">as </span>u64 &lt;= T::DECLARED_SIZE,
+<a href=#80 id=80 data-nosnippet>80</a>        <span class="string">"mem size: {}, declared: {}"</span>,
+<a href=#81 id=81 data-nosnippet>81</a>        std::mem::size_of::&lt;T&gt;(),
+<a href=#82 id=82 data-nosnippet>82</a>        T::DECLARED_SIZE
+<a href=#83 id=83 data-nosnippet>83</a>    );
+<a href=#84 id=84 data-nosnippet>84</a>    budget.as_budget().charge(
+<a href=#85 id=85 data-nosnippet>85</a>        ContractCostType::MemAlloc,
+<a href=#86 id=86 data-nosnippet>86</a>        <span class="prelude-val">Some</span>(n_elts.saturating_mul(T::DECLARED_SIZE)),
+<a href=#87 id=87 data-nosnippet>87</a>    )
+<a href=#88 id=88 data-nosnippet>88</a>}
+<a href=#89 id=89 data-nosnippet>89</a>
+<a href=#90 id=90 data-nosnippet>90</a><span class="kw">pub trait </span>MeteredAlloc&lt;T: DeclaredSizeForMetering&gt;: Sized {
+<a href=#91 id=91 data-nosnippet>91</a>    <span class="kw">fn </span>metered_new(value: T, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, HostError&gt;;
+<a href=#92 id=92 data-nosnippet>92</a>}
+<a href=#93 id=93 data-nosnippet>93</a>
+<a href=#94 id=94 data-nosnippet>94</a><span class="kw">impl</span>&lt;T: DeclaredSizeForMetering&gt; MeteredAlloc&lt;T&gt; <span class="kw">for </span>Rc&lt;T&gt; {
+<a href=#95 id=95 data-nosnippet>95</a>    <span class="kw">fn </span>metered_new(value: T, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, HostError&gt; {
+<a href=#96 id=96 data-nosnippet>96</a>        charge_heap_alloc::&lt;T&gt;(<span class="number">1</span>, budget)<span class="question-mark">?</span>;
+<a href=#97 id=97 data-nosnippet>97</a>        <span class="prelude-val">Ok</span>(Rc::new(value))
+<a href=#98 id=98 data-nosnippet>98</a>    }
+<a href=#99 id=99 data-nosnippet>99</a>}
+<a href=#100 id=100 data-nosnippet>100</a>
+<a href=#101 id=101 data-nosnippet>101</a><span class="doccomment">/// Represents a collection type which can be created from an iterator, and provides
+<a href=#102 id=102 data-nosnippet>102</a>/// a method for bulk charging its creation cost. This does not clone elements from
+<a href=#103 id=103 data-nosnippet>103</a>/// the iterator, just moves them into the container, so only charges shallow copies.
+<a href=#104 id=104 data-nosnippet>104</a></span><span class="kw">pub trait </span>MeteredContainer: FromIterator&lt;<span class="self">Self</span>::Item&gt; + DeclaredSizeForMetering
+<a href=#105 id=105 data-nosnippet>105</a><span class="kw">where
+<a href=#106 id=106 data-nosnippet>106</a>    </span><span class="self">Self</span>: Sized,
+<a href=#107 id=107 data-nosnippet>107</a>{
+<a href=#108 id=108 data-nosnippet>108</a>    <span class="kw">type </span>Item: DeclaredSizeForMetering;
+<a href=#109 id=109 data-nosnippet>109</a>    <span class="doccomment">/// Charges the cost for bulk initializing the container and copying `len` elements
+<a href=#110 id=110 data-nosnippet>110</a>    /// into it.
+<a href=#111 id=111 data-nosnippet>111</a>    </span><span class="kw">fn </span>charge_bulk_init_cpy(len: u64, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#112 id=112 data-nosnippet>112</a>        charge_shallow_copy::&lt;<span class="self">Self</span>&gt;(<span class="number">1</span>, budget.clone())<span class="question-mark">?</span>;
+<a href=#113 id=113 data-nosnippet>113</a>        charge_heap_alloc::&lt;<span class="self">Self</span>::Item&gt;(len, budget.clone())<span class="question-mark">?</span>;
+<a href=#114 id=114 data-nosnippet>114</a>        charge_shallow_copy::&lt;<span class="self">Self</span>::Item&gt;(len, budget)
+<a href=#115 id=115 data-nosnippet>115</a>    }
+<a href=#116 id=116 data-nosnippet>116</a>
+<a href=#117 id=117 data-nosnippet>117</a>    <span class="doccomment">/// Metered version of the container's `with_capacity` method.
+<a href=#118 id=118 data-nosnippet>118</a>    </span><span class="kw">fn </span>with_metered_capacity(capacity: usize, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, HostError&gt;;
+<a href=#119 id=119 data-nosnippet>119</a>}
+<a href=#120 id=120 data-nosnippet>120</a>
+<a href=#121 id=121 data-nosnippet>121</a><span class="kw">impl</span>&lt;T: DeclaredSizeForMetering&gt; MeteredContainer <span class="kw">for </span>Vec&lt;T&gt; {
+<a href=#122 id=122 data-nosnippet>122</a>    <span class="kw">type </span>Item = T;
+<a href=#123 id=123 data-nosnippet>123</a>
+<a href=#124 id=124 data-nosnippet>124</a>    <span class="kw">fn </span>with_metered_capacity(capacity: usize, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, HostError&gt; {
+<a href=#125 id=125 data-nosnippet>125</a>        <span class="self">Self</span>::charge_bulk_init_cpy(capacity <span class="kw">as </span>u64, budget)<span class="question-mark">?</span>;
+<a href=#126 id=126 data-nosnippet>126</a>        <span class="prelude-val">Ok</span>(Vec::with_capacity(capacity))
+<a href=#127 id=127 data-nosnippet>127</a>    }
+<a href=#128 id=128 data-nosnippet>128</a>}
+<a href=#129 id=129 data-nosnippet>129</a>
+<a href=#130 id=130 data-nosnippet>130</a><span class="doccomment">/// This is implemented in order `metered_collect` a `Vec&lt;Result&lt;T, E&gt;&gt;` into a
+<a href=#131 id=131 data-nosnippet>131</a>/// `Result&lt;Vec&lt;T&gt;, E&gt;`. It is only supposed to exist for charging purpose.
+<a href=#132 id=132 data-nosnippet>132</a></span><span class="kw">impl</span>&lt;T: DeclaredSizeForMetering, E: DeclaredSizeForMetering&gt; MeteredContainer
+<a href=#133 id=133 data-nosnippet>133</a>    <span class="kw">for </span><span class="prelude-ty">Result</span>&lt;Vec&lt;T&gt;, E&gt;
+<a href=#134 id=134 data-nosnippet>134</a>{
+<a href=#135 id=135 data-nosnippet>135</a>    <span class="kw">type </span>Item = <span class="prelude-ty">Result</span>&lt;T, E&gt;;
+<a href=#136 id=136 data-nosnippet>136</a>
+<a href=#137 id=137 data-nosnippet>137</a>    <span class="doccomment">/// This function will return an error. It is not expected to initialize a
+<a href=#138 id=138 data-nosnippet>138</a>    /// `Result&lt;Vec&lt;T, E&gt;&gt;` with capacity.
+<a href=#139 id=139 data-nosnippet>139</a>    </span><span class="kw">fn </span>with_metered_capacity(_capacity: usize, _budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, HostError&gt; {
+<a href=#140 id=140 data-nosnippet>140</a>        <span class="prelude-val">Err</span>(Error::from_type_and_code(ScErrorType::Object, ScErrorCode::InvalidAction).into())
+<a href=#141 id=141 data-nosnippet>141</a>    }
+<a href=#142 id=142 data-nosnippet>142</a>}
+<a href=#143 id=143 data-nosnippet>143</a>
+<a href=#144 id=144 data-nosnippet>144</a><span class="doccomment">/// Represents an iterator which can collect its elements into a `MeteredContainer`
+<a href=#145 id=145 data-nosnippet>145</a>/// and automatically account for the metering cost.
+<a href=#146 id=146 data-nosnippet>146</a>///
+<a href=#147 id=147 data-nosnippet>147</a>/// Returns:
+<a href=#148 id=148 data-nosnippet>148</a>///   Err - if either the budget was exceeded or the iterator lacks the size hint
+<a href=#149 id=149 data-nosnippet>149</a>///   Ok - otherwise
+<a href=#150 id=150 data-nosnippet>150</a></span><span class="kw">pub trait </span>MeteredIterator: Iterator
+<a href=#151 id=151 data-nosnippet>151</a><span class="kw">where
+<a href=#152 id=152 data-nosnippet>152</a>    </span><span class="self">Self</span>::Item: DeclaredSizeForMetering,
+<a href=#153 id=153 data-nosnippet>153</a>    <span class="self">Self</span>: Sized,
+<a href=#154 id=154 data-nosnippet>154</a>{
+<a href=#155 id=155 data-nosnippet>155</a>    <span class="kw">fn </span>metered_collect&lt;B: MeteredContainer&lt;Item = <span class="self">Self</span>::Item&gt;&gt;(
+<a href=#156 id=156 data-nosnippet>156</a>        <span class="self">self</span>,
+<a href=#157 id=157 data-nosnippet>157</a>        budget: <span class="kw">impl </span>AsBudget,
+<a href=#158 id=158 data-nosnippet>158</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;B, HostError&gt; {
+<a href=#159 id=159 data-nosnippet>159</a>        <span class="kw">if let </span>(<span class="kw">_</span>, <span class="prelude-val">Some</span>(ub)) = <span class="self">self</span>.size_hint() {
+<a href=#160 id=160 data-nosnippet>160</a>            B::charge_bulk_init_cpy(ub <span class="kw">as </span>u64, budget)<span class="question-mark">?</span>;
+<a href=#161 id=161 data-nosnippet>161</a>            <span class="prelude-val">Ok</span>(<span class="self">self</span>.collect())
+<a href=#162 id=162 data-nosnippet>162</a>        } <span class="kw">else </span>{
+<a href=#163 id=163 data-nosnippet>163</a>            <span class="prelude-val">Err</span>((ScErrorType::Object, ScErrorCode::InternalError).into())
+<a href=#164 id=164 data-nosnippet>164</a>        }
+<a href=#165 id=165 data-nosnippet>165</a>    }
+<a href=#166 id=166 data-nosnippet>166</a>}
+<a href=#167 id=167 data-nosnippet>167</a>
+<a href=#168 id=168 data-nosnippet>168</a><span class="kw">impl</span>&lt;T: DeclaredSizeForMetering, I: Iterator, F&gt; MeteredIterator <span class="kw">for </span>std::iter::Map&lt;I, F&gt; <span class="kw">where
+<a href=#169 id=169 data-nosnippet>169</a>    </span>F: FnMut(I::Item) -&gt; T
+<a href=#170 id=170 data-nosnippet>170</a>{
+<a href=#171 id=171 data-nosnippet>171</a>}
+<a href=#172 id=172 data-nosnippet>172</a>
+<a href=#173 id=173 data-nosnippet>173</a><span class="kw">impl</span>&lt;A, B&gt; MeteredIterator <span class="kw">for </span>std::iter::Chain&lt;A, B&gt;
+<a href=#174 id=174 data-nosnippet>174</a><span class="kw">where
+<a href=#175 id=175 data-nosnippet>175</a>    </span>A: Iterator,
+<a href=#176 id=176 data-nosnippet>176</a>    B: Iterator&lt;Item = A::Item&gt;,
+<a href=#177 id=177 data-nosnippet>177</a>    A::Item: DeclaredSizeForMetering,
+<a href=#178 id=178 data-nosnippet>178</a>{
+<a href=#179 id=179 data-nosnippet>179</a>}
+<a href=#180 id=180 data-nosnippet>180</a>
+<a href=#181 id=181 data-nosnippet>181</a><span class="doccomment">/// A type that can be cloned, and charges for the cost of doing so, possibly
+<a href=#182 id=182 data-nosnippet>182</a>/// failing if the clone runs out of budget. The cost of cloning may include
+<a href=#183 id=183 data-nosnippet>183</a>/// both "shallow" and "substructure" components.
+<a href=#184 id=184 data-nosnippet>184</a></span><span class="kw">pub trait </span>MeteredClone: Clone + DeclaredSizeForMetering {
+<a href=#185 id=185 data-nosnippet>185</a>    <span class="doccomment">/// By default every MeteredClone type just charges as though it's shallow;
+<a href=#186 id=186 data-nosnippet>186</a>    /// if a type is non-shallow (owns any substructure in the heap) it should
+<a href=#187 id=187 data-nosnippet>187</a>    /// override both `IS_SHALLOW` (setting it to `false`) and
+<a href=#188 id=188 data-nosnippet>188</a>    /// `charge_for_substructure` (correctly charging for cloning the
+<a href=#189 id=189 data-nosnippet>189</a>    /// substructure).
+<a href=#190 id=190 data-nosnippet>190</a>    </span><span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">true</span>;
+<a href=#191 id=191 data-nosnippet>191</a>
+<a href=#192 id=192 data-nosnippet>192</a>    <span class="doccomment">/// Called to clone the substructures of Self. The default implementation is
+<a href=#193 id=193 data-nosnippet>193</a>    /// a no-op and is _only_ appropriate when Self is a shallow type (with no
+<a href=#194 id=194 data-nosnippet>194</a>    /// substructure). If you override `Self::IS_SHALLOW` and set it to false,
+<a href=#195 id=195 data-nosnippet>195</a>    /// you should override this method also (it will actually Err if you
+<a href=#196 id=196 data-nosnippet>196</a>    /// don't). This charge does not include shallow copying of `Self` because
+<a href=#197 id=197 data-nosnippet>197</a>    /// that should be taken care of by the caller beforehand, e.g. in
+<a href=#198 id=198 data-nosnippet>198</a>    /// `metered_clone`.
+<a href=#199 id=199 data-nosnippet>199</a>    </span><span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, _budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#200 id=200 data-nosnippet>200</a>        <span class="kw">if </span><span class="self">Self</span>::IS_SHALLOW {
+<a href=#201 id=201 data-nosnippet>201</a>            <span class="prelude-val">Ok</span>(())
+<a href=#202 id=202 data-nosnippet>202</a>        } <span class="kw">else </span>{
+<a href=#203 id=203 data-nosnippet>203</a>            <span class="prelude-val">Err</span>((ScErrorType::Object, ScErrorCode::InternalError).into())
+<a href=#204 id=204 data-nosnippet>204</a>        }
+<a href=#205 id=205 data-nosnippet>205</a>    }
+<a href=#206 id=206 data-nosnippet>206</a>
+<a href=#207 id=207 data-nosnippet>207</a>    <span class="doccomment">/// Called when cloning the substructures of a slice of Self. When
+<a href=#208 id=208 data-nosnippet>208</a>    /// Self::IS_SHALLOW, this is a no-op. If Self::IS_SHALLOW is false, this
+<a href=#209 id=209 data-nosnippet>209</a>    /// method will do element-wise charging for substructure, assuming it is
+<a href=#210 id=210 data-nosnippet>210</a>    /// paired with element-wise cloning.
+<a href=#211 id=211 data-nosnippet>211</a>    </span><span class="kw">fn </span>bulk_charge_for_substructure(
+<a href=#212 id=212 data-nosnippet>212</a>        clones: <span class="kw-2">&amp;</span>[<span class="self">Self</span>],
+<a href=#213 id=213 data-nosnippet>213</a>        budget: <span class="kw">impl </span>AsBudget,
+<a href=#214 id=214 data-nosnippet>214</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#215 id=215 data-nosnippet>215</a>        <span class="kw">if </span><span class="self">Self</span>::IS_SHALLOW {
+<a href=#216 id=216 data-nosnippet>216</a>            <span class="comment">// If we're shallow, just return.
+<a href=#217 id=217 data-nosnippet>217</a>            </span><span class="prelude-val">Ok</span>(())
+<a href=#218 id=218 data-nosnippet>218</a>        } <span class="kw">else </span>{
+<a href=#219 id=219 data-nosnippet>219</a>            <span class="kw">for </span>elt <span class="kw">in </span>clones {
+<a href=#220 id=220 data-nosnippet>220</a>                elt.charge_for_substructure(budget.clone())<span class="question-mark">?</span>;
+<a href=#221 id=221 data-nosnippet>221</a>            }
+<a href=#222 id=222 data-nosnippet>222</a>            <span class="prelude-val">Ok</span>(())
+<a href=#223 id=223 data-nosnippet>223</a>        }
+<a href=#224 id=224 data-nosnippet>224</a>    }
+<a href=#225 id=225 data-nosnippet>225</a>
+<a href=#226 id=226 data-nosnippet>226</a>    <span class="doccomment">/// Convenience method for charging for a deep clone knowing the type is not
+<a href=#227 id=227 data-nosnippet>227</a>    /// shallow.
+<a href=#228 id=228 data-nosnippet>228</a>    </span><span class="kw">fn </span>charge_deep_clone(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#229 id=229 data-nosnippet>229</a>        <span class="kw">if </span><span class="self">Self</span>::IS_SHALLOW {
+<a href=#230 id=230 data-nosnippet>230</a>            <span class="prelude-val">Err</span>((ScErrorType::Object, ScErrorCode::InternalError).into())
+<a href=#231 id=231 data-nosnippet>231</a>        } <span class="kw">else </span>{
+<a href=#232 id=232 data-nosnippet>232</a>            charge_shallow_copy::&lt;<span class="self">Self</span>&gt;(<span class="number">1</span>, budget.clone())<span class="question-mark">?</span>;
+<a href=#233 id=233 data-nosnippet>233</a>            <span class="self">self</span>.charge_for_substructure(budget)
+<a href=#234 id=234 data-nosnippet>234</a>        }
+<a href=#235 id=235 data-nosnippet>235</a>    }
+<a href=#236 id=236 data-nosnippet>236</a>
+<a href=#237 id=237 data-nosnippet>237</a>    <span class="doccomment">/// Composite helper handles metering and then, if successful, cloning. It
+<a href=#238 id=238 data-nosnippet>238</a>    /// first charges for the shallow footprint of the type, followed by
+<a href=#239 id=239 data-nosnippet>239</a>    /// charging the substructure, and finally calling `Clone::clone`. The
+<a href=#240 id=240 data-nosnippet>240</a>    /// reason `charge_for_substructure` does not include shallow copying of
+<a href=#241 id=241 data-nosnippet>241</a>    /// `Self` is because it is taken care of here. Typically overriding
+<a href=#242 id=242 data-nosnippet>242</a>    /// `IS_SHALLOW` and `charge_for_substructure` should propertly take care of
+<a href=#243 id=243 data-nosnippet>243</a>    /// custom non-trivial cloning. Thus this method should not need to be
+<a href=#244 id=244 data-nosnippet>244</a>    /// overriden.
+<a href=#245 id=245 data-nosnippet>245</a>    </span><span class="kw">fn </span>metered_clone(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, HostError&gt; {
+<a href=#246 id=246 data-nosnippet>246</a>        charge_shallow_copy::&lt;<span class="self">Self</span>&gt;(<span class="number">1</span>, budget.clone())<span class="question-mark">?</span>;
+<a href=#247 id=247 data-nosnippet>247</a>        <span class="self">self</span>.charge_for_substructure(budget)<span class="question-mark">?</span>;
+<a href=#248 id=248 data-nosnippet>248</a>        <span class="prelude-val">Ok</span>(<span class="self">self</span>.clone())
+<a href=#249 id=249 data-nosnippet>249</a>    }
+<a href=#250 id=250 data-nosnippet>250</a>}
+<a href=#251 id=251 data-nosnippet>251</a>
+<a href=#252 id=252 data-nosnippet>252</a><span class="comment">// region: primitive types
+<a href=#253 id=253 data-nosnippet>253</a></span><span class="kw">impl </span>MeteredClone <span class="kw">for </span>u8 {}
+<a href=#254 id=254 data-nosnippet>254</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>u32 {}
+<a href=#255 id=255 data-nosnippet>255</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>i32 {}
+<a href=#256 id=256 data-nosnippet>256</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>u64 {}
+<a href=#257 id=257 data-nosnippet>257</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>i64 {}
+<a href=#258 id=258 data-nosnippet>258</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>u128 {}
+<a href=#259 id=259 data-nosnippet>259</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>i128 {}
+<a href=#260 id=260 data-nosnippet>260</a><span class="comment">// endregion: primitive types
+<a href=#261 id=261 data-nosnippet>261</a>
+<a href=#262 id=262 data-nosnippet>262</a>// region: Val-wrapping types
+<a href=#263 id=263 data-nosnippet>263</a></span><span class="kw">impl </span>MeteredClone <span class="kw">for </span>Val {}
+<a href=#264 id=264 data-nosnippet>264</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>Void {}
+<a href=#265 id=265 data-nosnippet>265</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>Bool {}
+<a href=#266 id=266 data-nosnippet>266</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>VecObject {}
+<a href=#267 id=267 data-nosnippet>267</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>MapObject {}
+<a href=#268 id=268 data-nosnippet>268</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>AddressObject {}
+<a href=#269 id=269 data-nosnippet>269</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>BytesObject {}
+<a href=#270 id=270 data-nosnippet>270</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>U32Val {}
+<a href=#271 id=271 data-nosnippet>271</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>I32Val {}
+<a href=#272 id=272 data-nosnippet>272</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>U64Val {}
+<a href=#273 id=273 data-nosnippet>273</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>U64Small {}
+<a href=#274 id=274 data-nosnippet>274</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>U64Object {}
+<a href=#275 id=275 data-nosnippet>275</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>I64Val {}
+<a href=#276 id=276 data-nosnippet>276</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>I64Small {}
+<a href=#277 id=277 data-nosnippet>277</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>I64Object {}
+<a href=#278 id=278 data-nosnippet>278</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>TimepointVal {}
+<a href=#279 id=279 data-nosnippet>279</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>TimepointSmall {}
+<a href=#280 id=280 data-nosnippet>280</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>TimepointObject {}
+<a href=#281 id=281 data-nosnippet>281</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>DurationVal {}
+<a href=#282 id=282 data-nosnippet>282</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>DurationSmall {}
+<a href=#283 id=283 data-nosnippet>283</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>DurationObject {}
+<a href=#284 id=284 data-nosnippet>284</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>U128Val {}
+<a href=#285 id=285 data-nosnippet>285</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>U128Small {}
+<a href=#286 id=286 data-nosnippet>286</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>U128Object {}
+<a href=#287 id=287 data-nosnippet>287</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>I128Val {}
+<a href=#288 id=288 data-nosnippet>288</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>I128Small {}
+<a href=#289 id=289 data-nosnippet>289</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>I128Object {}
+<a href=#290 id=290 data-nosnippet>290</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>U256Val {}
+<a href=#291 id=291 data-nosnippet>291</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>U256Small {}
+<a href=#292 id=292 data-nosnippet>292</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>U256Object {}
+<a href=#293 id=293 data-nosnippet>293</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>I256Val {}
+<a href=#294 id=294 data-nosnippet>294</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>I256Small {}
+<a href=#295 id=295 data-nosnippet>295</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>I256Object {}
+<a href=#296 id=296 data-nosnippet>296</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>Object {}
+<a href=#297 id=297 data-nosnippet>297</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>Error {}
+<a href=#298 id=298 data-nosnippet>298</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>StringObject {}
+<a href=#299 id=299 data-nosnippet>299</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>Symbol {}
+<a href=#300 id=300 data-nosnippet>300</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>SymbolSmall {}
+<a href=#301 id=301 data-nosnippet>301</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>SymbolObject {}
+<a href=#302 id=302 data-nosnippet>302</a><span class="comment">// endregion: Val-wrapping types
+<a href=#303 id=303 data-nosnippet>303</a>
+<a href=#304 id=304 data-nosnippet>304</a>// region: other env types with no substructure
+<a href=#305 id=305 data-nosnippet>305</a></span><span class="kw">impl </span>MeteredClone <span class="kw">for </span>SymbolStr {}
+<a href=#306 id=306 data-nosnippet>306</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>SymbolSmallIter {}
+<a href=#307 id=307 data-nosnippet>307</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>U256 {}
+<a href=#308 id=308 data-nosnippet>308</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>I256 {}
+<a href=#309 id=309 data-nosnippet>309</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>Address {}
+<a href=#310 id=310 data-nosnippet>310</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>AccessType {}
+<a href=#311 id=311 data-nosnippet>311</a><span class="comment">// endregion: other env types with no substructure
+<a href=#312 id=312 data-nosnippet>312</a>
+<a href=#313 id=313 data-nosnippet>313</a>// region: xdr types with no substructure
+<a href=#314 id=314 data-nosnippet>314</a></span><span class="kw">impl </span>MeteredClone <span class="kw">for </span>TimePoint {}
+<a href=#315 id=315 data-nosnippet>315</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>Duration {}
+<a href=#316 id=316 data-nosnippet>316</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>Hash {}
+<a href=#317 id=317 data-nosnippet>317</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>Uint256 {}
+<a href=#318 id=318 data-nosnippet>318</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>ContractCodeCostInputs {}
+<a href=#319 id=319 data-nosnippet>319</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>ContractCodeEntryV1 {}
+<a href=#320 id=320 data-nosnippet>320</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>ContractExecutable {}
+<a href=#321 id=321 data-nosnippet>321</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>AccountId {}
+<a href=#322 id=322 data-nosnippet>322</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>ScAddress {}
+<a href=#323 id=323 data-nosnippet>323</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>ScNonceKey {}
+<a href=#324 id=324 data-nosnippet>324</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>PublicKey {}
+<a href=#325 id=325 data-nosnippet>325</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>TrustLineAsset {}
+<a href=#326 id=326 data-nosnippet>326</a>
+<a href=#327 id=327 data-nosnippet>327</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>LedgerKeyAccount {}
+<a href=#328 id=328 data-nosnippet>328</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>LedgerKeyTrustLine {}
+<a href=#329 id=329 data-nosnippet>329</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>LedgerKeyContractCode {}
+<a href=#330 id=330 data-nosnippet>330</a>
+<a href=#331 id=331 data-nosnippet>331</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>LedgerEntryExt {}
+<a href=#332 id=332 data-nosnippet>332</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>TrustLineEntry {}
+<a href=#333 id=333 data-nosnippet>333</a>
+<a href=#334 id=334 data-nosnippet>334</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>CreateContractArgs {}
+<a href=#335 id=335 data-nosnippet>335</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>ContractIdPreimage {}
+<a href=#336 id=336 data-nosnippet>336</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>Asset {}
+<a href=#337 id=337 data-nosnippet>337</a><span class="comment">// endregion: xdr types with no substructure
+<a href=#338 id=338 data-nosnippet>338</a>
+<a href=#339 id=339 data-nosnippet>339</a>// region: Rust standard composite types
+<a href=#340 id=340 data-nosnippet>340</a>
+<a href=#341 id=341 data-nosnippet>341</a>// cloning Rc is just a ref-count bump
+<a href=#342 id=342 data-nosnippet>342</a></span><span class="kw">impl</span>&lt;T&gt; MeteredClone <span class="kw">for </span>Rc&lt;T&gt; {}
+<a href=#343 id=343 data-nosnippet>343</a>
+<a href=#344 id=344 data-nosnippet>344</a><span class="comment">// cloning a RefCell clones its underlying data structure
+<a href=#345 id=345 data-nosnippet>345</a></span><span class="kw">impl</span>&lt;T: MeteredClone&gt; MeteredClone <span class="kw">for </span>RefCell&lt;T&gt; {
+<a href=#346 id=346 data-nosnippet>346</a>    <span class="kw">const </span>IS_SHALLOW: bool = T::IS_SHALLOW;
+<a href=#347 id=347 data-nosnippet>347</a>
+<a href=#348 id=348 data-nosnippet>348</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#349 id=349 data-nosnippet>349</a>        <span class="self">self</span>.borrow().charge_for_substructure(budget)
+<a href=#350 id=350 data-nosnippet>350</a>    }
+<a href=#351 id=351 data-nosnippet>351</a>}
+<a href=#352 id=352 data-nosnippet>352</a>
+<a href=#353 id=353 data-nosnippet>353</a><span class="kw">impl</span>&lt;K, V&gt; MeteredClone <span class="kw">for </span>(K, V)
+<a href=#354 id=354 data-nosnippet>354</a><span class="kw">where
+<a href=#355 id=355 data-nosnippet>355</a>    </span>K: MeteredClone,
+<a href=#356 id=356 data-nosnippet>356</a>    V: MeteredClone,
+<a href=#357 id=357 data-nosnippet>357</a>{
+<a href=#358 id=358 data-nosnippet>358</a>    <span class="kw">const </span>IS_SHALLOW: bool = K::IS_SHALLOW &amp;&amp; V::IS_SHALLOW;
+<a href=#359 id=359 data-nosnippet>359</a>
+<a href=#360 id=360 data-nosnippet>360</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#361 id=361 data-nosnippet>361</a>        <span class="kw">if </span>!K::IS_SHALLOW {
+<a href=#362 id=362 data-nosnippet>362</a>            K::charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>, budget.clone())<span class="question-mark">?</span>;
+<a href=#363 id=363 data-nosnippet>363</a>        }
+<a href=#364 id=364 data-nosnippet>364</a>        <span class="kw">if </span>!V::IS_SHALLOW {
+<a href=#365 id=365 data-nosnippet>365</a>            V::charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">1</span>, budget)<span class="question-mark">?</span>;
+<a href=#366 id=366 data-nosnippet>366</a>        }
+<a href=#367 id=367 data-nosnippet>367</a>        <span class="prelude-val">Ok</span>(())
+<a href=#368 id=368 data-nosnippet>368</a>    }
+<a href=#369 id=369 data-nosnippet>369</a>}
+<a href=#370 id=370 data-nosnippet>370</a>
+<a href=#371 id=371 data-nosnippet>371</a><span class="kw">impl</span>&lt;C: MeteredClone, <span class="kw">const </span>N: usize&gt; MeteredClone <span class="kw">for </span>[C; N] {
+<a href=#372 id=372 data-nosnippet>372</a>    <span class="kw">const </span>IS_SHALLOW: bool = C::IS_SHALLOW;
+<a href=#373 id=373 data-nosnippet>373</a>
+<a href=#374 id=374 data-nosnippet>374</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#375 id=375 data-nosnippet>375</a>        C::bulk_charge_for_substructure(<span class="self">self</span>.as_slice(), budget)
+<a href=#376 id=376 data-nosnippet>376</a>    }
+<a href=#377 id=377 data-nosnippet>377</a>}
+<a href=#378 id=378 data-nosnippet>378</a>
+<a href=#379 id=379 data-nosnippet>379</a><span class="kw">impl</span>&lt;C: MeteredClone&gt; MeteredClone <span class="kw">for </span>Vec&lt;C&gt; {
+<a href=#380 id=380 data-nosnippet>380</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#381 id=381 data-nosnippet>381</a>
+<a href=#382 id=382 data-nosnippet>382</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#383 id=383 data-nosnippet>383</a>        <span class="comment">// first take care of Vec clone, which involves allocating memory and shallowly cloning the
+<a href=#384 id=384 data-nosnippet>384</a>        // data type into it, then deep clone any substructure.
+<a href=#385 id=385 data-nosnippet>385</a>        </span>charge_heap_alloc::&lt;C&gt;(<span class="self">self</span>.len() <span class="kw">as </span>u64, budget.clone())<span class="question-mark">?</span>;
+<a href=#386 id=386 data-nosnippet>386</a>        charge_shallow_copy::&lt;C&gt;(<span class="self">self</span>.len() <span class="kw">as </span>u64, budget.clone())<span class="question-mark">?</span>;
+<a href=#387 id=387 data-nosnippet>387</a>        C::bulk_charge_for_substructure(<span class="self">self</span>.as_slice(), budget)<span class="question-mark">?</span>;
+<a href=#388 id=388 data-nosnippet>388</a>        <span class="prelude-val">Ok</span>(())
+<a href=#389 id=389 data-nosnippet>389</a>    }
+<a href=#390 id=390 data-nosnippet>390</a>}
+<a href=#391 id=391 data-nosnippet>391</a>
+<a href=#392 id=392 data-nosnippet>392</a><span class="kw">impl</span>&lt;C: MeteredClone&gt; MeteredClone <span class="kw">for </span>Box&lt;C&gt; {
+<a href=#393 id=393 data-nosnippet>393</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#394 id=394 data-nosnippet>394</a>
+<a href=#395 id=395 data-nosnippet>395</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#396 id=396 data-nosnippet>396</a>        <span class="comment">// first take care of the Box clone: allocating memory and shallow cloning of data type.
+<a href=#397 id=397 data-nosnippet>397</a>        </span>charge_heap_alloc::&lt;C&gt;(<span class="number">1</span>, budget.clone())<span class="question-mark">?</span>;
+<a href=#398 id=398 data-nosnippet>398</a>        charge_shallow_copy::&lt;C&gt;(<span class="number">1</span>, budget.clone())<span class="question-mark">?</span>;
+<a href=#399 id=399 data-nosnippet>399</a>        <span class="comment">// then take care of any substructure clone (recursively)
+<a href=#400 id=400 data-nosnippet>400</a>        </span><span class="kw">let </span>inner: <span class="kw-2">&amp;</span>C = <span class="self">self</span>;
+<a href=#401 id=401 data-nosnippet>401</a>        inner.charge_for_substructure(budget)
+<a href=#402 id=402 data-nosnippet>402</a>    }
+<a href=#403 id=403 data-nosnippet>403</a>}
+<a href=#404 id=404 data-nosnippet>404</a>
+<a href=#405 id=405 data-nosnippet>405</a><span class="kw">impl</span>&lt;C: MeteredClone&gt; MeteredClone <span class="kw">for </span><span class="prelude-ty">Option</span>&lt;C&gt; {
+<a href=#406 id=406 data-nosnippet>406</a>    <span class="kw">const </span>IS_SHALLOW: bool = C::IS_SHALLOW;
+<a href=#407 id=407 data-nosnippet>407</a>
+<a href=#408 id=408 data-nosnippet>408</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#409 id=409 data-nosnippet>409</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#410 id=410 data-nosnippet>410</a>            <span class="prelude-val">Some</span>(elt) =&gt; elt.charge_for_substructure(budget),
+<a href=#411 id=411 data-nosnippet>411</a>            <span class="prelude-val">None </span>=&gt; <span class="prelude-val">Ok</span>(()),
+<a href=#412 id=412 data-nosnippet>412</a>        }
+<a href=#413 id=413 data-nosnippet>413</a>    }
+<a href=#414 id=414 data-nosnippet>414</a>}
+<a href=#415 id=415 data-nosnippet>415</a><span class="comment">// endregion: Rust standard composite types
+<a href=#416 id=416 data-nosnippet>416</a>
+<a href=#417 id=417 data-nosnippet>417</a>// region: other env types with substructure
+<a href=#418 id=418 data-nosnippet>418</a>// endregion: other env types with substructure
+<a href=#419 id=419 data-nosnippet>419</a>
+<a href=#420 id=420 data-nosnippet>420</a>// region: xdr types with substructure
+<a href=#421 id=421 data-nosnippet>421</a>
+<a href=#422 id=422 data-nosnippet>422</a></span><span class="kw">impl </span>MeteredClone <span class="kw">for </span>ScVal {
+<a href=#423 id=423 data-nosnippet>423</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#424 id=424 data-nosnippet>424</a>
+<a href=#425 id=425 data-nosnippet>425</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#426 id=426 data-nosnippet>426</a>        <span class="comment">// This is the depth limit checkpoint for `ScVal` cloning.
+<a href=#427 id=427 data-nosnippet>427</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>budget_clone = budget.as_budget().clone();
+<a href=#428 id=428 data-nosnippet>428</a>        budget_clone.with_limited_depth(|<span class="kw">_</span>| {
+<a href=#429 id=429 data-nosnippet>429</a>            <span class="kw">match </span><span class="self">self </span>{
+<a href=#430 id=430 data-nosnippet>430</a>                ScVal::Vec(<span class="prelude-val">Some</span>(v)) =&gt; ScVec::charge_for_substructure(v, budget),
+<a href=#431 id=431 data-nosnippet>431</a>                ScVal::Map(<span class="prelude-val">Some</span>(m)) =&gt; ScMap::charge_for_substructure(m, budget),
+<a href=#432 id=432 data-nosnippet>432</a>                ScVal::Vec(<span class="prelude-val">None</span>) | ScVal::Map(<span class="prelude-val">None</span>) =&gt; {
+<a href=#433 id=433 data-nosnippet>433</a>                    <span class="prelude-val">Err</span>((ScErrorType::Value, ScErrorCode::InvalidInput).into())
+<a href=#434 id=434 data-nosnippet>434</a>                }
+<a href=#435 id=435 data-nosnippet>435</a>                ScVal::Bytes(b) =&gt; BytesM::charge_for_substructure(b, budget),
+<a href=#436 id=436 data-nosnippet>436</a>                ScVal::String(s) =&gt; StringM::charge_for_substructure(s, budget),
+<a href=#437 id=437 data-nosnippet>437</a>                ScVal::Symbol(s) =&gt; StringM::charge_for_substructure(s, budget),
+<a href=#438 id=438 data-nosnippet>438</a>                ScVal::ContractInstance(i) =&gt; {
+<a href=#439 id=439 data-nosnippet>439</a>                    ScContractInstance::charge_for_substructure(i, budget)
+<a href=#440 id=440 data-nosnippet>440</a>                }
+<a href=#441 id=441 data-nosnippet>441</a>                <span class="comment">// Everything else was handled by the memcpy above.
+<a href=#442 id=442 data-nosnippet>442</a>                </span>ScVal::U64(<span class="kw">_</span>)
+<a href=#443 id=443 data-nosnippet>443</a>                | ScVal::I64(<span class="kw">_</span>)
+<a href=#444 id=444 data-nosnippet>444</a>                | ScVal::U128(<span class="kw">_</span>)
+<a href=#445 id=445 data-nosnippet>445</a>                | ScVal::I128(<span class="kw">_</span>)
+<a href=#446 id=446 data-nosnippet>446</a>                | ScVal::Address(<span class="kw">_</span>)
+<a href=#447 id=447 data-nosnippet>447</a>                | ScVal::U32(<span class="kw">_</span>)
+<a href=#448 id=448 data-nosnippet>448</a>                | ScVal::I32(<span class="kw">_</span>)
+<a href=#449 id=449 data-nosnippet>449</a>                | ScVal::Error(<span class="kw">_</span>)
+<a href=#450 id=450 data-nosnippet>450</a>                | ScVal::Bool(<span class="kw">_</span>)
+<a href=#451 id=451 data-nosnippet>451</a>                | ScVal::Void
+<a href=#452 id=452 data-nosnippet>452</a>                | ScVal::Timepoint(<span class="kw">_</span>)
+<a href=#453 id=453 data-nosnippet>453</a>                | ScVal::Duration(<span class="kw">_</span>)
+<a href=#454 id=454 data-nosnippet>454</a>                | ScVal::U256(<span class="kw">_</span>)
+<a href=#455 id=455 data-nosnippet>455</a>                | ScVal::I256(<span class="kw">_</span>)
+<a href=#456 id=456 data-nosnippet>456</a>                | ScVal::LedgerKeyContractInstance
+<a href=#457 id=457 data-nosnippet>457</a>                | ScVal::LedgerKeyNonce(<span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(()),
+<a href=#458 id=458 data-nosnippet>458</a>            }
+<a href=#459 id=459 data-nosnippet>459</a>        })
+<a href=#460 id=460 data-nosnippet>460</a>    }
+<a href=#461 id=461 data-nosnippet>461</a>}
+<a href=#462 id=462 data-nosnippet>462</a>
+<a href=#463 id=463 data-nosnippet>463</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>ScValObject {
+<a href=#464 id=464 data-nosnippet>464</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#465 id=465 data-nosnippet>465</a>
+<a href=#466 id=466 data-nosnippet>466</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#467 id=467 data-nosnippet>467</a>        &lt;<span class="self">Self </span><span class="kw">as </span>AsRef&lt;ScVal&gt;&gt;::as_ref(<span class="self">self</span>).charge_for_substructure(budget)
+<a href=#468 id=468 data-nosnippet>468</a>    }
+<a href=#469 id=469 data-nosnippet>469</a>}
+<a href=#470 id=470 data-nosnippet>470</a>
+<a href=#471 id=471 data-nosnippet>471</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>ScMapEntry {
+<a href=#472 id=472 data-nosnippet>472</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#473 id=473 data-nosnippet>473</a>
+<a href=#474 id=474 data-nosnippet>474</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#475 id=475 data-nosnippet>475</a>        <span class="self">self</span>.key.charge_for_substructure(budget.clone())<span class="question-mark">?</span>;
+<a href=#476 id=476 data-nosnippet>476</a>        <span class="self">self</span>.val.charge_for_substructure(budget)
+<a href=#477 id=477 data-nosnippet>477</a>    }
+<a href=#478 id=478 data-nosnippet>478</a>}
+<a href=#479 id=479 data-nosnippet>479</a>
+<a href=#480 id=480 data-nosnippet>480</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>ScVec {
+<a href=#481 id=481 data-nosnippet>481</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#482 id=482 data-nosnippet>482</a>
+<a href=#483 id=483 data-nosnippet>483</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#484 id=484 data-nosnippet>484</a>        <span class="self">self</span>.<span class="number">0</span>.charge_for_substructure(budget) <span class="comment">// self.0 will be deref'ed into Vec
+<a href=#485 id=485 data-nosnippet>485</a>    </span>}
+<a href=#486 id=486 data-nosnippet>486</a>}
+<a href=#487 id=487 data-nosnippet>487</a>
+<a href=#488 id=488 data-nosnippet>488</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>ScMap {
+<a href=#489 id=489 data-nosnippet>489</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#490 id=490 data-nosnippet>490</a>
+<a href=#491 id=491 data-nosnippet>491</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#492 id=492 data-nosnippet>492</a>        <span class="self">self</span>.<span class="number">0</span>.charge_for_substructure(budget) <span class="comment">// self.0 will be deref'ed into Vec
+<a href=#493 id=493 data-nosnippet>493</a>    </span>}
+<a href=#494 id=494 data-nosnippet>494</a>}
+<a href=#495 id=495 data-nosnippet>495</a>
+<a href=#496 id=496 data-nosnippet>496</a><span class="kw">impl</span>&lt;<span class="kw">const </span>C: u32&gt; MeteredClone <span class="kw">for </span>BytesM&lt;C&gt; {
+<a href=#497 id=497 data-nosnippet>497</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#498 id=498 data-nosnippet>498</a>
+<a href=#499 id=499 data-nosnippet>499</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#500 id=500 data-nosnippet>500</a>        &lt;<span class="self">Self </span><span class="kw">as </span>AsRef&lt;Vec&lt;u8&gt;&gt;&gt;::as_ref(<span class="self">self</span>).charge_for_substructure(budget)
+<a href=#501 id=501 data-nosnippet>501</a>    }
+<a href=#502 id=502 data-nosnippet>502</a>}
+<a href=#503 id=503 data-nosnippet>503</a>
+<a href=#504 id=504 data-nosnippet>504</a><span class="kw">impl</span>&lt;<span class="kw">const </span>C: u32&gt; MeteredClone <span class="kw">for </span>StringM&lt;C&gt; {
+<a href=#505 id=505 data-nosnippet>505</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#506 id=506 data-nosnippet>506</a>
+<a href=#507 id=507 data-nosnippet>507</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#508 id=508 data-nosnippet>508</a>        &lt;<span class="self">Self </span><span class="kw">as </span>AsRef&lt;Vec&lt;u8&gt;&gt;&gt;::as_ref(<span class="self">self</span>).charge_for_substructure(budget)
+<a href=#509 id=509 data-nosnippet>509</a>    }
+<a href=#510 id=510 data-nosnippet>510</a>}
+<a href=#511 id=511 data-nosnippet>511</a>
+<a href=#512 id=512 data-nosnippet>512</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>ScBytes {
+<a href=#513 id=513 data-nosnippet>513</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#514 id=514 data-nosnippet>514</a>
+<a href=#515 id=515 data-nosnippet>515</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#516 id=516 data-nosnippet>516</a>        &lt;<span class="self">Self </span><span class="kw">as </span>AsRef&lt;Vec&lt;u8&gt;&gt;&gt;::as_ref(<span class="self">self</span>).charge_for_substructure(budget)
+<a href=#517 id=517 data-nosnippet>517</a>    }
+<a href=#518 id=518 data-nosnippet>518</a>}
+<a href=#519 id=519 data-nosnippet>519</a>
+<a href=#520 id=520 data-nosnippet>520</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>ScString {
+<a href=#521 id=521 data-nosnippet>521</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#522 id=522 data-nosnippet>522</a>
+<a href=#523 id=523 data-nosnippet>523</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#524 id=524 data-nosnippet>524</a>        &lt;<span class="self">Self </span><span class="kw">as </span>AsRef&lt;Vec&lt;u8&gt;&gt;&gt;::as_ref(<span class="self">self</span>).charge_for_substructure(budget)
+<a href=#525 id=525 data-nosnippet>525</a>    }
+<a href=#526 id=526 data-nosnippet>526</a>}
+<a href=#527 id=527 data-nosnippet>527</a>
+<a href=#528 id=528 data-nosnippet>528</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>ScSymbol {
+<a href=#529 id=529 data-nosnippet>529</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#530 id=530 data-nosnippet>530</a>
+<a href=#531 id=531 data-nosnippet>531</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#532 id=532 data-nosnippet>532</a>        &lt;<span class="self">Self </span><span class="kw">as </span>AsRef&lt;Vec&lt;u8&gt;&gt;&gt;::as_ref(<span class="self">self</span>).charge_for_substructure(budget)
+<a href=#533 id=533 data-nosnippet>533</a>    }
+<a href=#534 id=534 data-nosnippet>534</a>}
+<a href=#535 id=535 data-nosnippet>535</a>
+<a href=#536 id=536 data-nosnippet>536</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>ScContractInstance {
+<a href=#537 id=537 data-nosnippet>537</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#538 id=538 data-nosnippet>538</a>
+<a href=#539 id=539 data-nosnippet>539</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#540 id=540 data-nosnippet>540</a>        <span class="self">self</span>.storage.charge_for_substructure(budget)
+<a href=#541 id=541 data-nosnippet>541</a>    }
+<a href=#542 id=542 data-nosnippet>542</a>}
+<a href=#543 id=543 data-nosnippet>543</a>
+<a href=#544 id=544 data-nosnippet>544</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>LedgerKey {
+<a href=#545 id=545 data-nosnippet>545</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#546 id=546 data-nosnippet>546</a>
+<a href=#547 id=547 data-nosnippet>547</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#548 id=548 data-nosnippet>548</a>        <span class="kw">use </span>LedgerKey::<span class="kw-2">*</span>;
+<a href=#549 id=549 data-nosnippet>549</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#550 id=550 data-nosnippet>550</a>            ContractData(d) =&gt; d.key.charge_for_substructure(budget),
+<a href=#551 id=551 data-nosnippet>551</a>            ContractCode(<span class="kw">_</span>) | Account(<span class="kw">_</span>) | Trustline(<span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(()),
+<a href=#552 id=552 data-nosnippet>552</a>
+<a href=#553 id=553 data-nosnippet>553</a>            Offer(<span class="kw">_</span>) | Data(<span class="kw">_</span>) | ClaimableBalance(<span class="kw">_</span>) | LiquidityPool(<span class="kw">_</span>) | ConfigSetting(<span class="kw">_</span>)
+<a href=#554 id=554 data-nosnippet>554</a>            | Ttl(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>((ScErrorType::Value, ScErrorCode::InternalError).into()),
+<a href=#555 id=555 data-nosnippet>555</a>        }
+<a href=#556 id=556 data-nosnippet>556</a>    }
+<a href=#557 id=557 data-nosnippet>557</a>}
+<a href=#558 id=558 data-nosnippet>558</a>
+<a href=#559 id=559 data-nosnippet>559</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>ContractCodeEntry {
+<a href=#560 id=560 data-nosnippet>560</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#561 id=561 data-nosnippet>561</a>
+<a href=#562 id=562 data-nosnippet>562</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#563 id=563 data-nosnippet>563</a>        <span class="comment">// self.ext is a former ExtensionEntry; see note on ExtensionEntry in declared_size.rs
+<a href=#564 id=564 data-nosnippet>564</a>        </span><span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.ext {
+<a href=#565 id=565 data-nosnippet>565</a>            ContractCodeEntryExt::V0 =&gt; (),
+<a href=#566 id=566 data-nosnippet>566</a>            ContractCodeEntryExt::V1(v1) =&gt; v1.charge_for_substructure(budget.clone())<span class="question-mark">?</span>,
+<a href=#567 id=567 data-nosnippet>567</a>        }
+<a href=#568 id=568 data-nosnippet>568</a>        <span class="self">self</span>.code.charge_for_substructure(budget)
+<a href=#569 id=569 data-nosnippet>569</a>    }
+<a href=#570 id=570 data-nosnippet>570</a>}
+<a href=#571 id=571 data-nosnippet>571</a>
+<a href=#572 id=572 data-nosnippet>572</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>LedgerEntry {
+<a href=#573 id=573 data-nosnippet>573</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#574 id=574 data-nosnippet>574</a>
+<a href=#575 id=575 data-nosnippet>575</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#576 id=576 data-nosnippet>576</a>        <span class="kw">use </span>LedgerEntryData::<span class="kw-2">*</span>;
+<a href=#577 id=577 data-nosnippet>577</a>        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.data {
+<a href=#578 id=578 data-nosnippet>578</a>            ContractData(d) =&gt; {
+<a href=#579 id=579 data-nosnippet>579</a>                d.val.charge_for_substructure(budget.clone())<span class="question-mark">?</span>;
+<a href=#580 id=580 data-nosnippet>580</a>                d.key.charge_for_substructure(budget)
+<a href=#581 id=581 data-nosnippet>581</a>            }
+<a href=#582 id=582 data-nosnippet>582</a>            ContractCode(c) =&gt; c.charge_for_substructure(budget),
+<a href=#583 id=583 data-nosnippet>583</a>            Account(ae) =&gt; ae.charge_for_substructure(budget),
+<a href=#584 id=584 data-nosnippet>584</a>            Trustline(<span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(()),
+<a href=#585 id=585 data-nosnippet>585</a>
+<a href=#586 id=586 data-nosnippet>586</a>            Offer(<span class="kw">_</span>) | Data(<span class="kw">_</span>) | ClaimableBalance(<span class="kw">_</span>) | LiquidityPool(<span class="kw">_</span>) | ConfigSetting(<span class="kw">_</span>)
+<a href=#587 id=587 data-nosnippet>587</a>            | Ttl(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>((ScErrorType::Value, ScErrorCode::InternalError).into()),
+<a href=#588 id=588 data-nosnippet>588</a>        }
+<a href=#589 id=589 data-nosnippet>589</a>    }
+<a href=#590 id=590 data-nosnippet>590</a>}
+<a href=#591 id=591 data-nosnippet>591</a>
+<a href=#592 id=592 data-nosnippet>592</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>Signer {
+<a href=#593 id=593 data-nosnippet>593</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#594 id=594 data-nosnippet>594</a>
+<a href=#595 id=595 data-nosnippet>595</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#596 id=596 data-nosnippet>596</a>        <span class="kw">use </span><span class="kw">crate</span>::xdr::SignerKey::<span class="kw-2">*</span>;
+<a href=#597 id=597 data-nosnippet>597</a>        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.key {
+<a href=#598 id=598 data-nosnippet>598</a>            Ed25519(<span class="kw">_</span>) | PreAuthTx(<span class="kw">_</span>) | HashX(<span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(()),
+<a href=#599 id=599 data-nosnippet>599</a>            Ed25519SignedPayload(p) =&gt; p.payload.charge_for_substructure(budget),
+<a href=#600 id=600 data-nosnippet>600</a>        }
+<a href=#601 id=601 data-nosnippet>601</a>    }
+<a href=#602 id=602 data-nosnippet>602</a>}
+<a href=#603 id=603 data-nosnippet>603</a>
+<a href=#604 id=604 data-nosnippet>604</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>AccountEntry {
+<a href=#605 id=605 data-nosnippet>605</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#606 id=606 data-nosnippet>606</a>
+<a href=#607 id=607 data-nosnippet>607</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#608 id=608 data-nosnippet>608</a>        <span class="self">self</span>.home_domain.charge_for_substructure(budget.clone())<span class="question-mark">?</span>;
+<a href=#609 id=609 data-nosnippet>609</a>        <span class="self">self</span>.signers.charge_for_substructure(budget)
+<a href=#610 id=610 data-nosnippet>610</a>    }
+<a href=#611 id=611 data-nosnippet>611</a>}
+<a href=#612 id=612 data-nosnippet>612</a>
+<a href=#613 id=613 data-nosnippet>613</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>SorobanAuthorizedInvocation {
+<a href=#614 id=614 data-nosnippet>614</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#615 id=615 data-nosnippet>615</a>
+<a href=#616 id=616 data-nosnippet>616</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#617 id=617 data-nosnippet>617</a>        <span class="self">self</span>.function.charge_for_substructure(budget.clone())<span class="question-mark">?</span>;
+<a href=#618 id=618 data-nosnippet>618</a>        <span class="self">self</span>.sub_invocations.charge_for_substructure(budget)
+<a href=#619 id=619 data-nosnippet>619</a>    }
+<a href=#620 id=620 data-nosnippet>620</a>}
+<a href=#621 id=621 data-nosnippet>621</a>
+<a href=#622 id=622 data-nosnippet>622</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>SorobanAuthorizationEntry {
+<a href=#623 id=623 data-nosnippet>623</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#624 id=624 data-nosnippet>624</a>
+<a href=#625 id=625 data-nosnippet>625</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#626 id=626 data-nosnippet>626</a>        <span class="self">self</span>.root_invocation.charge_for_substructure(budget)
+<a href=#627 id=627 data-nosnippet>627</a>    }
+<a href=#628 id=628 data-nosnippet>628</a>}
+<a href=#629 id=629 data-nosnippet>629</a>
+<a href=#630 id=630 data-nosnippet>630</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>SorobanAuthorizedFunction {
+<a href=#631 id=631 data-nosnippet>631</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#632 id=632 data-nosnippet>632</a>
+<a href=#633 id=633 data-nosnippet>633</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#634 id=634 data-nosnippet>634</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#635 id=635 data-nosnippet>635</a>            <span class="comment">// InvokeContractArgs carries a vector as substructure.
+<a href=#636 id=636 data-nosnippet>636</a>            </span>SorobanAuthorizedFunction::ContractFn(c) =&gt; c.charge_for_substructure(budget),
+<a href=#637 id=637 data-nosnippet>637</a>            <span class="comment">// CreateContractArgs has no substructure.
+<a href=#638 id=638 data-nosnippet>638</a>            </span>SorobanAuthorizedFunction::CreateContractHostFn(<span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(()),
+<a href=#639 id=639 data-nosnippet>639</a>            SorobanAuthorizedFunction::CreateContractV2HostFn(c) =&gt; {
+<a href=#640 id=640 data-nosnippet>640</a>                c.charge_for_substructure(budget)
+<a href=#641 id=641 data-nosnippet>641</a>            }
+<a href=#642 id=642 data-nosnippet>642</a>        }
+<a href=#643 id=643 data-nosnippet>643</a>    }
+<a href=#644 id=644 data-nosnippet>644</a>}
+<a href=#645 id=645 data-nosnippet>645</a>
+<a href=#646 id=646 data-nosnippet>646</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>InvokeContractArgs {
+<a href=#647 id=647 data-nosnippet>647</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#648 id=648 data-nosnippet>648</a>
+<a href=#649 id=649 data-nosnippet>649</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#650 id=650 data-nosnippet>650</a>        <span class="self">self</span>.function_name.charge_for_substructure(budget.clone())<span class="question-mark">?</span>;
+<a href=#651 id=651 data-nosnippet>651</a>        <span class="self">self</span>.args.charge_for_substructure(budget)
+<a href=#652 id=652 data-nosnippet>652</a>    }
+<a href=#653 id=653 data-nosnippet>653</a>}
+<a href=#654 id=654 data-nosnippet>654</a>
+<a href=#655 id=655 data-nosnippet>655</a><span class="kw">impl </span>MeteredClone <span class="kw">for </span>CreateContractArgsV2 {
+<a href=#656 id=656 data-nosnippet>656</a>    <span class="kw">const </span>IS_SHALLOW: bool = <span class="bool-val">false</span>;
+<a href=#657 id=657 data-nosnippet>657</a>
+<a href=#658 id=658 data-nosnippet>658</a>    <span class="kw">fn </span>charge_for_substructure(<span class="kw-2">&amp;</span><span class="self">self</span>, budget: <span class="kw">impl </span>AsBudget) -&gt; <span class="prelude-ty">Result</span>&lt;(), HostError&gt; {
+<a href=#659 id=659 data-nosnippet>659</a>        <span class="self">self</span>.contract_id_preimage
+<a href=#660 id=660 data-nosnippet>660</a>            .charge_for_substructure(budget.clone())<span class="question-mark">?</span>;
+<a href=#661 id=661 data-nosnippet>661</a>        <span class="self">self</span>.executable.charge_for_substructure(budget.clone())<span class="question-mark">?</span>;
+<a href=#662 id=662 data-nosnippet>662</a>        <span class="self">self</span>.constructor_args.charge_for_substructure(budget)
+<a href=#663 id=663 data-nosnippet>663</a>    }
+<a href=#664 id=664 data-nosnippet>664</a>}
+<a href=#665 id=665 data-nosnippet>665</a><span class="comment">// endregion: xdr types with substructure
+</span></code></pre></div></section></main></body></html>

@@ -1,82 +1,199 @@
-use anchor_lang::prelude::*;
+//! Zuno — Fully On-Chain ZK Card Game (Soroban)
+//!
+//! This is the contract entry point. It maps the original Anchor
+//! `#[program] mod zuno` block 1:1 to a Soroban `#[contractimpl] impl
+//! ZunoContract` block. Each instruction in the original `instructions/`
+//! directory is implemented as a public method on `ZunoContract` (see
+//! `src/instructions/*.rs`).
+//!
+//! Module layout:
+//!   - `state`     : on-chain data model (GameRoom, PlayerState, Card,
+//!                   GameStatus, DataKey)
+//!   - `error`     : `#[contracterror]` enum
+//!   - `constants` : non-state constants (penalties, dealing size)
+//!   - `instructions`: one file per game action
+
+#![no_std]
+
+use soroban_sdk::{contract, contractimpl, Address, Bytes, Env, Vec};
 
 pub mod constants;
 pub mod error;
 pub mod instructions;
 pub mod state;
 
-use instructions::*;
-use state::Card;
+use crate::error::ZunoError;
 
-declare_id!("ZUNoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+// ── Contract ────────────────────────────────────────────────────────────────
 
-#[program]
-pub mod zuno {
-    use super::*;
+#[contract]
+pub struct ZunoContract;
 
-    /// Create a new game room. Host pays the buy-in and becomes the first player.
+// ── Contract implementation ─────────────────────────────────────────────────
+//
+// Each method is a thin entry point that delegates to the per-instruction
+// file in `instructions/`. The original Anchor handler signatures took a
+// `Context<...>` plus typed args; the Soroban equivalents take `env: &Env`
+// followed by the contract parameters directly. Authentication (i.e.
+// "is the caller the host?") is handled inside the per-instruction file
+// via `env.invoker()` / `require_auth()`, and the XLM token transfer is
+// performed via the `token::Client` wrapper.
+
+#[contractimpl]
+impl ZunoContract {
+    // ── Lobby lifecycle ─────────────────────────────────────────────────────
+
+    /// Create a new game room. The host becomes the first player and
+    /// pays their own `stake_amount` in XLM stroops.
+    ///
+    /// `seed_commitment` is the host's commit-reveal commitment (a
+    /// Poseidon2 hash of a random seed) — the actual seed is revealed
+    /// later in `start_game`. This prevents the host from biasing the
+    /// deck shuffle.
     pub fn initialize_room(
-        ctx: Context<InitializeRoom>,
-        buy_in: u64,
+        env: Env,
+        host: Address,
         room_id: u64,
-    ) -> Result<()> {
-        ctx.accounts.validate(buy_in)?;
-        initialize_room::handler(ctx, buy_in, room_id)
+        stake_amount: i128,
+        xlm_token: Address,
+        verifier_contract: Address,
+        seed_commitment: Bytes,
+    ) -> Result<(), ZunoError> {
+        instructions::initialize_room::handler(
+            env,
+            host,
+            room_id,
+            stake_amount,
+            xlm_token,
+            verifier_contract,
+            seed_commitment,
+        )
     }
 
-    /// Join an open room. Player pays the buy-in and gets a PlayerState PDA.
-    pub fn join_room(ctx: Context<JoinRoom>) -> Result<()> {
-        join_room::handler(ctx)
+    /// Join an open room. The player pays `stake_amount` and gets a
+    /// fresh `PlayerState`. A `PlayerState` is NOT yet initialised with
+    /// a hand commitment here — that happens off-chain after the deck
+    /// is dealt (post-`start_game`).
+    pub fn join_room(
+        env: Env,
+        player: Address,
+        room_id: u64,
+    ) -> Result<(), ZunoError> {
+        instructions::join_room::handler(env, player, room_id)
     }
 
-    /// Host starts the game. Triggers Switchboard VRF for deck randomness.
-    pub fn start_game(ctx: Context<StartGame>) -> Result<()> {
-        start_game::handler(ctx)
+    // ── Game start (commit-reveal randomness) ─────────────────────────────
+
+    /// First step of the commit-reveal randomness flow. The host calls
+    /// this to signal that the lobby is closed and the game is about
+    /// to begin. The room transitions from `Waiting` to
+    /// `AwaitingReveal`.
+    pub fn start_game(
+        env: Env,
+        host: Address,
+        room_id: u64,
+    ) -> Result<(), ZunoError> {
+        instructions::start_game::handler(env, host, room_id)
     }
 
-    /// Switchboard oracle callback: seeds the deck and activates the game.
-    pub fn consume_randomness(ctx: Context<ConsumeRandomness>) -> Result<()> {
-        consume_randomness::handler(ctx)
+    /// Second step of the commit-reveal randomness flow. The host
+    /// discloses the seed they committed during `initialize_room`.
+    /// The contract verifies the reveal matches the commitment,
+    /// derives the deck root, picks a non-wild numbered top card,
+    /// and transitions the room to `Active`.
+    pub fn reveal_randomness(
+        env: Env,
+        host: Address,
+        room_id: u64,
+        seed_reveal: Bytes,
+    ) -> Result<(), ZunoError> {
+        instructions::reveal_randomness::handler(env, host, room_id, seed_reveal)
     }
 
-    /// Play a card. Submits a ZK proof, updates hand commitment and top card.
+    // ── Per-turn actions (require ZK proofs) ────────────────────────────────
+
+    /// Play a card from the active player's hand. The proof is checked
+    /// against the on-chain `verifier_contract` (a BN254 verifier
+    /// deployed separately on Stellar Testnet). On success, the room's
+    /// `top_card` is updated, the player's `hand_commitment` is
+    /// replaced, `card_count` is decremented, and the turn advances
+    /// (with Skip / Reverse handling).
     pub fn play_card(
-        ctx: Context<PlayCard>,
-        proof: Vec<u8>,
-        played_card: Card,
-        new_hand_hash: [u8; 32],
-    ) -> Result<()> {
-        play_card::handler(ctx, proof, played_card, new_hand_hash)
+        env: Env,
+        player: Address,
+        room_id: u64,
+        proof: Bytes,
+        public_inputs: Vec<soroban_sdk::Val>,
+    ) -> Result<(), ZunoError> {
+        instructions::play_card::handler(env, player, room_id, proof, public_inputs)
     }
 
-    /// Draw a card from the deck. Submits a ZK proof, updates hand commitment.
+    /// Draw a card from the deck. Proof verifies the new hand
+    /// commitment against the drawn card's hash and the deck root.
+    /// Increments `card_count`, clears `has_called_zuno`, advances turn.
     pub fn draw_card(
-        ctx: Context<DrawCard>,
-        proof: Vec<u8>,
-        new_hand_hash: [u8; 32],
-        card_hash: [u8; 32],
-    ) -> Result<()> {
-        draw_card::handler(ctx, proof, new_hand_hash, card_hash)
+        env: Env,
+        player: Address,
+        room_id: u64,
+        proof: Bytes,
+        public_inputs: Vec<soroban_sdk::Val>,
+    ) -> Result<(), ZunoError> {
+        instructions::draw_card::handler(env, player, room_id, proof, public_inputs)
     }
 
-    /// Declare "Zuno" when you have exactly 2 cards. Must be called before
-    /// playing down to 1 card or risk being punished.
-    pub fn call_zuno(ctx: Context<CallZuno>) -> Result<()> {
-        call_zuno::handler(ctx)
+    // ── Status / punishment / forfeit ───────────────────────────────────────
+
+    /// Declare "Zuno!" when you have exactly 2 cards. The contract
+    /// checks `card_count == 2` and that the player has not already
+    /// called Zuno this round.
+    pub fn call_zuno(
+        env: Env,
+        player: Address,
+        room_id: u64,
+    ) -> Result<(), ZunoError> {
+        instructions::call_zuno::handler(env, player, room_id)
     }
 
-    /// Claim the pot when your card count reaches 0.
-    pub fn claim_victory(ctx: Context<ClaimVictory>) -> Result<()> {
-        claim_victory::handler(ctx)
+    /// Claim the pot when your hand reaches 0 cards. The contract
+    /// transfers the entire XLM pot to the caller and marks the room
+    /// `Finished`. **This is a trust assumption for the hackathon**:
+    /// the contract does not re-verify `card_count == 0` with a ZK
+    /// proof — it relies on the `card_count` that was tracked through
+    /// the preceding `play_card` / `draw_card` invocations.
+    pub fn claim_victory(
+        env: Env,
+        winner: Address,
+        room_id: u64,
+    ) -> Result<(), ZunoError> {
+        instructions::claim_victory::handler(env, winner, room_id)
     }
 
-    /// Anyone can force-skip an AFK player after their 60-second deadline.
-    pub fn force_skip(ctx: Context<ForceSkip>) -> Result<()> {
-        force_skip::handler(ctx)
+    /// Anyone can force-skip an AFK player after `TURN_TIMEOUT_SECS`
+    /// has elapsed. The AFK player draws one card and the turn
+    /// advances past them.
+    pub fn force_skip(
+        env: Env,
+        caller: Address,
+        room_id: u64,
+    ) -> Result<(), ZunoError> {
+        instructions::force_skip::handler(env, caller, room_id)
     }
 
-    /// Catch a player at 1 card who forgot to call Zuno — they draw 2.
-    pub fn punish_zuno(ctx: Context<PunishZuno>) -> Result<()> {
-        punish_zuno::handler(ctx)
+    /// Catch a player who has 1 card but has not called Zuno. The
+    /// caller forces the offender to draw 2 extra cards.
+    pub fn punish_zuno(
+        env: Env,
+        caller: Address,
+        target: Address,
+        room_id: u64,
+    ) -> Result<(), ZunoError> {
+        instructions::punish_zuno::handler(env, caller, target, room_id)
     }
 }
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+//
+// Unit tests for the per-instruction logic live in each
+// `instructions/<name>.rs` file. The end-to-end integration tests that
+// were previously in `tests/zuno.ts` (Anchor / TypeScript) will be
+// rewritten in Rust under `tests/` in a follow-up step.

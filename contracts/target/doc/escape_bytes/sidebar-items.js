@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["EscapeIntoError","UnescapeError","UnescapeIntoError"],"fn":["escape","escape_into","escaped_len","escaped_max_len","unescape","unescape_into","unescaped_len"],"struct":["Escape","Unescape"]};

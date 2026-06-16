@@ -1,0 +1,59 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Library and CLI containing types and functionality for working with Stellar XDR."><title>stellar_xdr - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-77263533.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="stellar_xdr" data-themes="" data-resource-suffix="" data-rustdoc-version="1.94.1 (e408947bf 2026-03-25)" data-channel="1.94.1" data-search-js="search-9e2438ea.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-c38705f0.js" ><script src="../static.files/storage-e2aeef58.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-7bab91a1.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-ffcac47a.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate stellar_xdr</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../stellar_xdr/index.html">stellar_<wbr>xdr</a><span class="version">22.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#usage" title="Usage">Usage</a><ul><li><a href="#library" title="Library">Library</a></li><li><a href="#cli" title="CLI">CLI</a></li></ul></li></ul><h3><a href="#modules">Crate Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#constants" title="Constants">Constants</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content"><div class="main-heading"><h1>Crate <span>stellar_<wbr>xdr</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/stellar_xdr/lib.rs.html#1-137">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Library and CLI containing types and functionality for working with Stellar
+XDR.</p>
+<p>Types are generated from XDR definitions hosted at <a href="https://github.com/stellar/stellar-xdr">stellar/stellar-xdr</a>
+using <a href="https://github.com/stellar/xdrgen">xdrgen</a>.</p>
+<h3 id="usage"><a class="doc-anchor" href="#usage">§</a>Usage</h3><h4 id="library"><a class="doc-anchor" href="#library">§</a>Library</h4>
+<p>To use the library, include in your toml:</p>
+<div class="example-wrap"><pre class="language-toml"><code>stellar-xdr = { version = &quot;...&quot;, default-features = true, features = [] }</code></pre></div><h5 id="features"><a class="doc-anchor" href="#features">§</a>Features</h5>
+<p>The crate has several features, tiers of functionality, ancillary
+functionality, and channels of XDR.</p>
+<p>Default features: <code>std</code>, <code>curr</code>.</p>
+<p>Teirs of functionality:</p>
+<ol>
+<li><code>std</code> – The std feature provides all functionality (types, encode,
+decode), and is the default feature set.</li>
+<li><code>alloc</code> – The alloc feature uses <code>Box</code> and <code>Vec</code> types for recursive
+references and arrays, and is automatically enabled if the std feature is
+enabled. The default global allocator is used. Support for a custom
+allocator will be added in <a href="https://github.com/stellar/rs-stellar-xdr/issues/39">#39</a>. No encode or decode capability exists,
+only types. Encode and decode capability will be added in <a href="https://github.com/stellar/rs-stellar-xdr/issues/46">#46</a>.</li>
+<li>If std or alloc are not enabled recursive and array types requires static
+lifetime values. No encode or decode capability exists. Encode and decode
+capability will be added in <a href="https://github.com/stellar/rs-stellar-xdr/issues/47">#47</a>.</li>
+</ol>
+<p>Ancillary functionality:</p>
+<ol>
+<li><code>base64</code> – Enables support for base64 encoding and decoding.</li>
+<li><code>serde</code> – Enables support for serializing and deserializing types with
+the serde crate.</li>
+<li><code>serde_json</code> – Enables support for built-in functionality specifically
+for serde_json. Often not required to use the types with serde_json, and
+only necessary to use utility functions that depend on serde_json.</li>
+<li><code>arbitrary</code> – Enables support for interop with the arbitrary crate.</li>
+<li><code>hex</code> – Enables support for hex in string representations of some types.
+Automatically enabled when serde is enabled.</li>
+<li><code>schemars</code> – Enables support for JSON Schema generation. (Experimental)</li>
+</ol>
+<p>Features marked experimental may disappear at anytime, see breaking changes
+at anytime, or and may be minimal implementations instead of complete.</p>
+<p>Channels of XDR:</p>
+<ul>
+<li><code>curr</code> – XDR types built from the <code>stellar/stellar-xdr</code> <code>curr</code> branch.</li>
+<li><code>next</code> – XDR types built from the <code>stellar/stellar-xdr</code> <code>next</code> branch.</li>
+</ul>
+<p>If a single channel is enabled the types are available at the root of the
+crate. If multiple channels are enabled they are available in modules at
+the root of the crate.</p>
+<h4 id="cli"><a class="doc-anchor" href="#cli">§</a>CLI</h4>
+<p>To use the CLI:</p>
+<div class="example-wrap"><pre class="language-console"><code>cargo install --locked stellar-xdr --version ... --features cli</code></pre></div><h5 id="examples"><a class="doc-anchor" href="#examples">§</a>Examples</h5>
+<p>Parse a <code>TransactionEnvelope</code>:</p>
+<div class="example-wrap"><pre class="language-console"><code>stellar-xdr decode --type TransactionEnvelope &lt;&lt; -
+AAAAA...
+-</code></pre></div>
+<p>Parse a <code>ScSpecEntry</code> stream from a contract:</p>
+<div class="example-wrap"><pre class="language-console"><code>stellar-xdr +next decode --type ScSpecEntry --input stream-base64 --output json-formatted &lt;&lt; -
+AAAAA...
+-</code></pre></div>
+<p>Parse a <code>BucketEntry</code> framed stream from a bucket file:</p>
+<div class="example-wrap"><pre class="language-console"><code>stellar-xdr decode --type BucketEntry --input stream-framed --output json-formatted bucket.xdr</code></pre></div></div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="curr/index.html" title="mod stellar_xdr::curr">curr</a></dt></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Version.html" title="struct stellar_xdr::Version">Version</a></dt></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.VERSION.html" title="constant stellar_xdr::VERSION">VERSION</a></dt></dl><script type="text/json" id="notable-traits-data">{"ReadXdrIter<&mut R, Self>":"<h3>Notable traits for <code><a class=\"struct\" href=\"curr/struct.ReadXdrIter.html\" title=\"struct stellar_xdr::curr::ReadXdrIter\">ReadXdrIter</a>&lt;R, S&gt;</code></h3><pre><code><div class=\"where\">impl&lt;R: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.94.1/std/io/trait.Read.html\" title=\"trait std::io::Read\">Read</a>, S: <a class=\"trait\" href=\"curr/trait.ReadXdr.html\" title=\"trait stellar_xdr::curr::ReadXdr\">ReadXdr</a>&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.94.1/core/iter/traits/iterator/trait.Iterator.html\" title=\"trait core::iter::traits::iterator::Iterator\">Iterator</a> for <a class=\"struct\" href=\"curr/struct.ReadXdrIter.html\" title=\"struct stellar_xdr::curr::ReadXdrIter\">ReadXdrIter</a>&lt;R, S&gt;</div><div class=\"where\">    type <a href=\"https://doc.rust-lang.org/1.94.1/core/iter/traits/iterator/trait.Iterator.html#associatedtype.Item\" class=\"associatedtype\">Item</a> = <a class=\"enum\" href=\"https://doc.rust-lang.org/1.94.1/core/result/enum.Result.html\" title=\"enum core::result::Result\">Result</a>&lt;S, <a class=\"enum\" href=\"curr/enum.Error.html\" title=\"enum stellar_xdr::curr::Error\">Error</a>&gt;;</div>","ReadXdrIter<DecoderReader<'_, R>, Self>":"<h3>Notable traits for <code><a class=\"struct\" href=\"curr/struct.ReadXdrIter.html\" title=\"struct stellar_xdr::curr::ReadXdrIter\">ReadXdrIter</a>&lt;R, S&gt;</code></h3><pre><code><div class=\"where\">impl&lt;R: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.94.1/std/io/trait.Read.html\" title=\"trait std::io::Read\">Read</a>, S: <a class=\"trait\" href=\"curr/trait.ReadXdr.html\" title=\"trait stellar_xdr::curr::ReadXdr\">ReadXdr</a>&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.94.1/core/iter/traits/iterator/trait.Iterator.html\" title=\"trait core::iter::traits::iterator::Iterator\">Iterator</a> for <a class=\"struct\" href=\"curr/struct.ReadXdrIter.html\" title=\"struct stellar_xdr::curr::ReadXdrIter\">ReadXdrIter</a>&lt;R, S&gt;</div><div class=\"where\">    type <a href=\"https://doc.rust-lang.org/1.94.1/core/iter/traits/iterator/trait.Iterator.html#associatedtype.Item\" class=\"associatedtype\">Item</a> = <a class=\"enum\" href=\"https://doc.rust-lang.org/1.94.1/core/result/enum.Result.html\" title=\"enum core::result::Result\">Result</a>&lt;S, <a class=\"enum\" href=\"curr/enum.Error.html\" title=\"enum stellar_xdr::curr::Error\">Error</a>&gt;;</div>"}</script></section></div></main></body></html>

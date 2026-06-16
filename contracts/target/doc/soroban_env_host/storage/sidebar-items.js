@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AccessType","FootprintMode"],"struct":["Footprint","Storage"],"trait":["SnapshotSource"],"type":["EntryWithLiveUntil","FootprintMap","StorageMap"]};

@@ -1,69 +1,70 @@
-use anchor_lang::prelude::*;
+//! `force_skip` — anyone can advance the turn past an AFK player
+//! after `TURN_TIMEOUT_SECS` has elapsed.
+//!
+//! The AFK player draws one card (their `card_count` is incremented
+//! but their `hand_commitment` is NOT updated — the off-chain client
+//! is responsible for producing a `draw_card` ZK proof to commit to
+//! the new hand). The turn then advances past them. This keeps the
+//! pot and the room alive when one player walks away.
+//!
+//! Note: this method only forces the *turn* to advance. It does not
+//! forfeit the player or refund the pot. The room stays `Active` so
+//! the AFK player can re-join on their next move (their `turn_deadline`
+//! is reset just like any other draw).
 
-use crate::constants::*;
+use soroban_sdk::{Address, Env, Symbol};
+
 use crate::error::ZunoError;
-use crate::state::*;
+use crate::state::{GameRoom, GameStatus, PlayerState, TURN_TIMEOUT_SECS};
 
-#[derive(Accounts)]
-pub struct ForceSkip<'info> {
-    #[account(
-        mut,
-        constraint = game_room.status == GameStatus::Active @ ZunoError::GameNotActive,
-    )]
-    pub game_room: Account<'info, GameRoom>,
+const TOPIC_FORCE_SKIP: &str = "force_skip";
 
-    /// CHECK: The player whose turn has expired (identified by current_turn index)
-    #[account(
-        mut,
-        seeds = [SEED_PLAYER_STATE, game_room.key().as_ref(), afk_player.key().as_ref()],
-        bump = afk_player_state.bump,
-        constraint = afk_player_state.player == afk_player.key(),
-        constraint = afk_player_state.room == game_room.key(),
-    )]
-    pub afk_player_state: Account<'info, PlayerState>,
+pub fn handler(env: Env, caller: Address, room_id: u64) -> Result<(), ZunoError> {
+    // ── Auth: the caller authorises the force-skip ───────────────────
+    caller.require_auth();
 
-    /// CHECK: The AFK player — validated via current_turn constraint below
-    pub afk_player: AccountInfo<'info>,
+    // ── Load state ────────────────────────────────────────────────────
+    let mut room = GameRoom::load(&env, room_id).ok_or(ZunoError::RoomNotFound)?;
+    if room.status != GameStatus::Active {
+        return Err(ZunoError::GameNotActive);
+    }
 
-    // Anyone can call force_skip; no signer restriction
-    pub caller: Signer<'info>,
-}
+    // The deadline must have elapsed.
+    if env.ledger().timestamp() <= room.turn_deadline {
+        return Err(ZunoError::TurnNotExpired);
+    }
 
-pub fn handler(ctx: Context<ForceSkip>) -> Result<()> {
-    let room = &mut ctx.accounts.game_room;
-    let ps = &mut ctx.accounts.afk_player_state;
+    // The AFK player is whoever holds the current turn.
+    let afk = room
+        .active_player()
+        .ok_or(ZunoError::RoomNotFound)?;
+    let mut afk_state =
+        PlayerState::load(&env, room_id, &afk).ok_or(ZunoError::RoomNotFound)?;
 
-    // Confirm it's actually this player's turn
-    require!(
-        room.active_player() == ctx.accounts.afk_player.key(),
-        ZunoError::NotYourTurn
-    );
+    // ── Apply the force-skip ─────────────────────────────────────────
+    // The AFK player draws 1. The actual hand_commitment update is
+    // gated on a follow-up `draw_card` ZK proof from the AFK player
+    // (or, if they don't return, the off-chain indexer observes the
+    // mismatch and the game is forfeited via a separate flow).
+    afk_state.card_count = afk_state
+        .card_count
+        .checked_add(1)
+        .ok_or(ZunoError::Overflow)?;
+    afk_state.has_called_zuno = false;
 
-    let clock = Clock::get()?;
-    require!(
-        clock.unix_timestamp > room.turn_deadline,
-        ZunoError::TurnNotExpired
-    );
-
-    // AFK penalty: +1 card to their count
-    ps.card_count = ps.card_count.checked_add(1).ok_or(ZunoError::Overflow)?;
-    ps.has_called_zuno = false;
-
+    // Advance the turn past the AFK player.
     room.advance_turn();
-    room.turn_deadline = clock.unix_timestamp + TURN_TIMEOUT_SECS;
+    room.turn_deadline = env.ledger().timestamp() + TURN_TIMEOUT_SECS;
 
-    emit!(TurnForceSkipped {
-        room: room.key(),
-        afk_player: ctx.accounts.afk_player.key(),
-        new_card_count: ps.card_count,
-    });
+    // ── Persist ──────────────────────────────────────────────────────
+    room.save(&env, room_id);
+    afk_state.save(&env);
+
+    // ── Emit ForceSkipped event ─────────────────────────────────────
+    env.events().publish(
+        (Symbol::new(&env, TOPIC_FORCE_SKIP), caller.clone()),
+        (room_id, afk, afk_state.card_count),
+    );
 
     Ok(())
-}
-
-#[event]
-pub struct TurnForceSkipped {
-    pub room: Pubkey,
-    pub afk_player: Pubkey,
-    pub new_card_count: u8,
 }

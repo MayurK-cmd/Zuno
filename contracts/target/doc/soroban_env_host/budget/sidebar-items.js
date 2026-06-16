@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_HOST_DEPTH_LIMIT","DEFAULT_XDR_RW_LIMITS"],"struct":["Budget","CostTracker","MeteredCostComponent","ScaledU64"],"trait":["AsBudget"]};

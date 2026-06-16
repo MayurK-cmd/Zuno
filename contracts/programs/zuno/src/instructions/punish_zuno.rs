@@ -1,64 +1,77 @@
-use anchor_lang::prelude::*;
+//! `punish_zuno` — catch a player who has reached 1 card without
+//! calling Zuno.
+//!
+//! Anyone can call this against an offender. The contract checks:
+//!   - the room is in `Active` state
+//!   - the offender's `card_count == 1`
+//!   - the offender has NOT called Zuno
+//!   - the caller is not the offender (no self-policing)
+//!
+//! On success, the offender's `card_count` is incremented by
+//! `DRAW_PENALTY_CARDS` (= 2) and their `hand_commitment` is
+//! unchanged. As with `force_skip`, the actual hand_commitment
+//! update is gated on a follow-up `draw_card` ZK proof that the
+//! offender must produce locally (the contract trusts `card_count`
+//! for ordering, not for hidden-hand correctness — that comes from
+//! the ZK proof).
+//!
+//! **No caller reward.** The caller spends a transaction fee; the
+//! only effect is the 2-card penalty on the offender.
 
-use crate::constants::*;
+use soroban_sdk::{Address, Env, Symbol};
+
+use crate::constants::DRAW_PENALTY_CARDS;
 use crate::error::ZunoError;
-use crate::state::*;
+use crate::state::{GameRoom, GameStatus, PlayerState};
 
-#[derive(Accounts)]
-pub struct PunishZuno<'info> {
-    #[account(
-        constraint = game_room.status == GameStatus::Active @ ZunoError::GameNotActive,
-    )]
-    pub game_room: Account<'info, GameRoom>,
+const TOPIC_PUNISH_ZUNO: &str = "punish_zuno";
 
-    #[account(
-        mut,
-        seeds = [SEED_PLAYER_STATE, game_room.key().as_ref(), offender.key().as_ref()],
-        bump = offender_state.bump,
-        constraint = offender_state.player == offender.key(),
-        constraint = offender_state.room == game_room.key(),
-    )]
-    pub offender_state: Account<'info, PlayerState>,
+pub fn handler(
+    env: Env,
+    caller: Address,
+    target: Address,
+    room_id: u64,
+) -> Result<(), ZunoError> {
+    // ── Auth: the caller authorises the punish ───────────────────────
+    caller.require_auth();
 
-    /// CHECK: The player who forgot to call Zuno
-    pub offender: AccountInfo<'info>,
+    // ── Load state ────────────────────────────────────────────────────
+    let room = GameRoom::load(&env, room_id).ok_or(ZunoError::RoomNotFound)?;
+    if room.status != GameStatus::Active {
+        return Err(ZunoError::GameNotActive);
+    }
 
-    pub caller: Signer<'info>,
-}
+    // ── Validate ──────────────────────────────────────────────────────
+    if caller == target {
+        return Err(ZunoError::CannotPunishSelf);
+    }
+    if !room.players.contains(&target) {
+        return Err(ZunoError::RoomNotFound);
+    }
 
-pub fn handler(ctx: Context<PunishZuno>) -> Result<()> {
-    require!(
-        ctx.accounts.caller.key() != ctx.accounts.offender.key(),
-        ZunoError::CannotPunishSelf
-    );
+    let mut target_state =
+        PlayerState::load(&env, room_id, &target).ok_or(ZunoError::RoomNotFound)?;
 
-    let ps = &mut ctx.accounts.offender_state;
+    if target_state.has_called_zuno {
+        return Err(ZunoError::PunishNotApplicable);
+    }
+    if target_state.card_count != 1 {
+        return Err(ZunoError::PunishNotApplicable);
+    }
 
-    require!(
-        ps.card_count == 1 && !ps.has_called_zuno,
-        ZunoError::PunishNotApplicable
-    );
-
-    ps.card_count = ps
+    // ── Apply the penalty ────────────────────────────────────────────
+    target_state.card_count = target_state
         .card_count
         .checked_add(DRAW_PENALTY_CARDS)
         .ok_or(ZunoError::Overflow)?;
-    ps.has_called_zuno = false;
+    target_state.has_called_zuno = false;
+    target_state.save(&env);
 
-    emit!(ZunoPunished {
-        room: ctx.accounts.game_room.key(),
-        offender: ctx.accounts.offender.key(),
-        penalty_cards: DRAW_PENALTY_CARDS,
-        new_card_count: ps.card_count,
-    });
+    // ── Emit Punished event ─────────────────────────────────────────
+    env.events().publish(
+        (Symbol::new(&env, TOPIC_PUNISH_ZUNO), caller.clone()),
+        (room_id, target, target_state.card_count),
+    );
 
     Ok(())
-}
-
-#[event]
-pub struct ZunoPunished {
-    pub room: Pubkey,
-    pub offender: Pubkey,
-    pub penalty_cards: u8,
-    pub new_card_count: u8,
 }

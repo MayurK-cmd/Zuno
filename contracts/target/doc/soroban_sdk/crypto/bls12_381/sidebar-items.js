@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FP2_SERIALIZED_SIZE","FP_SERIALIZED_SIZE","G1_SERIALIZED_SIZE","G2_SERIALIZED_SIZE"],"struct":["Bls12_381","Fp","Fp2","Fr","G1Affine","G2Affine"]};

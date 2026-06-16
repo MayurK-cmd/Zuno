@@ -1,0 +1,185 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Migrating from v21 to v22"><title>soroban_sdk::_migrating - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-77263533.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="soroban_sdk" data-themes="" data-resource-suffix="" data-rustdoc-version="1.94.1 (e408947bf 2026-03-25)" data-channel="1.94.1" data-search-js="search-9e2438ea.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../static.files/main-7bab91a1.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-ffcac47a.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module _migrating</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../soroban_sdk/index.html">soroban_<wbr>sdk</a><span class="version">22.0.11</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module _migrating</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#migrating-from-v21-to-v22" title="Migrating from v21 to v22">Migrating from v21 to v22</a></li><li><a href="#migrating-from-v20-to-v21" title="Migrating from v20 to v21">Migrating from v20 to v21</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="../index.html">In crate soroban_<wbr>sdk</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">soroban_sdk</a></div><h1>Module <span>_migrating</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/soroban_sdk/_migrating.rs.html#1-236">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="migrating-from-v21-to-v22"><a class="doc-anchor" href="#migrating-from-v21-to-v22">§</a>Migrating from v21 to v22</h2>
+<ol>
+<li>
+<p><a href="crate::Env::register"><code>Env::register</code></a> and <a href="crate::Env::register_at"><code>Env::register_at</code></a> replace <a href="crate::Env::register_contract"><code>Env::register_contract</code></a> and <a href="crate::Env::register_contract_wasm"><code>Env::register_contract_wasm</code></a>.</p>
+<p><a href="crate::Env::register"><code>register</code></a> registers both native contracts previously registered with
+<a href="crate::Env::register_contract"><code>register_contract</code></a> and Wasm contracts previously registered with
+<a href="crate::Env::register_contract_wasm"><code>register_contract_wasm</code></a>. It accepts a tuple that is passed to the
+contracts constructor. Pass <code>()</code> if the contract has no constructor.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>soroban_sdk::{contract, contractimpl, Env};
+
+<span class="attr">#[contract]
+</span><span class="kw">pub struct </span>Contract;
+
+<span class="attr">#[contractimpl]
+</span><span class="kw">impl </span>Contract {
+    <span class="comment">// ..
+</span>}
+
+<span class="attr">#[test]
+</span><span class="kw">fn </span>test() {
+    <span class="kw">let </span>env = Env::default();
+    <span class="kw">let </span>address = env.register(
+        Contract,  <span class="comment">// 👈 👀 The contract being registered, or a Wasm `&amp;[u8]`.
+        </span>(),        <span class="comment">// 👈 👀 The constructor arguments, or ().
+    </span>);
+    <span class="comment">// ..
+</span>}</code></pre></div>
+<p><a href="crate::Env::register_at"><code>register_at</code></a> registers both native contracts previously registered
+with <a href="crate::Env::register_contract"><code>register_contract</code></a> and Wasm contracts previously registered with
+<a href="crate::Env::register_contract_wasm"><code>register_contract_wasm</code></a>, and allows setting the address that the
+contract is registered at. It accepts a tuple that is passed to the
+contracts constructor. Pass <code>()</code> if the contract has no constructor.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>soroban_sdk::{contract, contractimpl, Env, Address, testutils::Address <span class="kw">as _</span>};
+
+<span class="attr">#[contract]
+</span><span class="kw">pub struct </span>Contract;
+
+<span class="attr">#[contractimpl]
+</span><span class="kw">impl </span>Contract {
+    <span class="comment">// ..
+</span>}
+
+<span class="attr">#[test]
+</span><span class="kw">fn </span>test() {
+    <span class="kw">let </span>env = Env::default();
+    <span class="kw">let </span>address = Address::generate(<span class="kw-2">&amp;</span>env);
+    env.register_at(
+        <span class="kw-2">&amp;</span>address,   <span class="comment">// 👈 👀 The address to register the contract at.
+        </span>Contract,  <span class="comment">// 👈 👀 The contract being registered, or a Wasm `&amp;[u8]`.
+        </span>(),        <span class="comment">// 👈 👀 The constructor arguments, or ().
+    </span>);
+    <span class="comment">// ..
+</span>}</code></pre></div></li>
+<li>
+<p><a href="../deploy/struct.DeployerWithAddress.html#method.deploy_v2" title="method soroban_sdk::deploy::DeployerWithAddress::deploy_v2"><code>DeployerWithAddress::deploy_v2</code></a> replaces <a href="../deploy/struct.DeployerWithAddress.html#method.deploy" title="method soroban_sdk::deploy::DeployerWithAddress::deploy"><code>DeployerWithAddress::deploy</code></a>.</p>
+<p><a href="../deploy/struct.DeployerWithAddress.html#method.deploy_v2" title="method soroban_sdk::deploy::DeployerWithAddress::deploy_v2"><code>deploy_v2</code></a> is the same as <a href="../deploy/struct.DeployerWithAddress.html#method.deploy" title="method soroban_sdk::deploy::DeployerWithAddress::deploy"><code>deploy</code></a>, except it accepts a list of
+arguments to be passed to the contracts constructor that will be called
+when it is deployed. For deploying existing contracts that do not have
+constructors, pass <code>()</code>.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>soroban_sdk::{contract, contractimpl, BytesN, Env};
+
+<span class="attr">#[contract]
+</span><span class="kw">pub struct </span>Contract;
+
+<span class="attr">#[contractimpl]
+</span><span class="kw">impl </span>Contract {
+    <span class="kw">pub fn </span>exec(env: Env, wasm_hash: BytesN&lt;<span class="number">32</span>&gt;) {
+        <span class="kw">let </span>salt = [<span class="number">0u8</span>; <span class="number">32</span>];
+        <span class="kw">let </span>deployer = env.deployer().with_current_contract(salt);
+        <span class="comment">// Pass `()` for contracts that have no contstructor, or have a
+        // constructor and require no arguments. Pass arguments in a
+        // tuple if any required.
+        </span><span class="kw">let </span>contract_address = deployer.deploy_v2(wasm_hash, ());
+    }
+}
+
+<span class="attr">#[test]
+</span><span class="kw">fn </span>test() {
+    <span class="kw">let </span>env = Env::default();
+    <span class="kw">let </span>contract_address = env.register(Contract, ());
+    <span class="kw">let </span>contract = ContractClient::new(<span class="kw-2">&amp;</span>env, <span class="kw-2">&amp;</span>contract_address);
+    <span class="comment">// Upload the contract code before deploying its instance.
+    </span><span class="kw">const </span>WASM: <span class="kw-2">&amp;</span>[u8] = <span class="macro">include_bytes!</span>(<span class="string">"../doctest_fixtures/contract.wasm"</span>);
+    <span class="kw">let </span>wasm_hash = env.deployer().upload_contract_wasm(WASM);
+    contract.exec(<span class="kw-2">&amp;</span>wasm_hash);
+}</code></pre></div></li>
+<li>
+<p>Deprecated <a href="crate::testutils::arbitrary::fuzz_catch_panic"><code>fuzz_catch_panic</code></a>. Use <a href="../struct.Env.html#method.try_invoke_contract" title="method soroban_sdk::Env::try_invoke_contract"><code>Env::try_invoke_contract</code></a> and the <code>try_</code> client functions instead.</p>
+<p>The <code>fuzz_catch_panic</code> function could be used in fuzz tests to catch a contract panic. Improved behavior can be found by invoking a contract with the <code>try_</code> variant of the invoke function contract clients.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>libfuzzer_sys::fuzz_target;
+<span class="kw">use </span>soroban_sdk::{contract, contracterror, contractimpl, Env, testutils::arbitrary::<span class="kw-2">*</span>};
+
+<span class="attr">#[contract]
+</span><span class="kw">pub struct </span>Contract;
+
+<span class="attr">#[contracterror]
+#[derive(Debug, PartialEq)]
+</span><span class="kw">pub enum </span>Error {
+    Overflow = <span class="number">1</span>,
+}
+
+<span class="attr">#[contractimpl]
+</span><span class="kw">impl </span>Contract {
+    <span class="kw">pub fn </span>add(x: u32, y: u32) -&gt; <span class="prelude-ty">Result</span>&lt;u32, Error&gt; {
+        x.checked_add(y).ok_or(Error::Overflow)
+    }
+}
+
+<span class="attr">#[derive(Arbitrary, Debug)]
+</span><span class="kw">pub struct </span>Input {
+    <span class="kw">pub </span>x: u32,
+    <span class="kw">pub </span>y: u32,
+}
+
+<span class="macro">fuzz_target!</span>(|input: Input| {
+    <span class="kw">let </span>env = Env::default();
+    <span class="kw">let </span>id = env.register(Contract, ());
+    <span class="kw">let </span>client = ContractClient::new(<span class="kw-2">&amp;</span>env, <span class="kw-2">&amp;</span>id);
+
+    <span class="kw">let </span>result = client.try_add(<span class="kw-2">&amp;</span>input.x, <span class="kw-2">&amp;</span>input.y);
+    <span class="kw">match </span>result {
+        <span class="comment">// Returned if the function succeeds, and the value returned is
+        // the type expected.
+        </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Ok</span>(<span class="kw">_</span>)) =&gt; {}
+        <span class="comment">// Returned if the function succeeds, and the value returned is
+        // NOT the type expected.
+        </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Err</span>(<span class="kw">_</span>)) =&gt; <span class="macro">panic!</span>(<span class="string">"unexpected type"</span>),
+        <span class="comment">// Returned if the function fails, and the error returned is
+        // recognised as part of the contract errors enum.
+        </span><span class="prelude-val">Err</span>(<span class="prelude-val">Ok</span>(<span class="kw">_</span>)) =&gt; {}
+        <span class="comment">// Returned if the function fails, and the error returned is NOT
+        // recognised, or the contract panic'd.
+        </span><span class="prelude-val">Err</span>(<span class="prelude-val">Err</span>(<span class="kw">_</span>)) =&gt; <span class="macro">panic!</span>(<span class="string">"unexpected error"</span>),
+    }
+});
+</code></pre></div></li>
+<li>
+<p>Events in test snapshots are now reduced to only contract events and system events. Diagnostic events will no longer appear in test snapshots.</p>
+<p>This will cause all test snapshot JSON files generated by the SDK to change when upgrading to this major version of the SDK. The change should be isolated to events and should omit only diagnostic events.</p>
+</li>
+</ol>
+<h2 id="migrating-from-v20-to-v21"><a class="doc-anchor" href="#migrating-from-v20-to-v21">§</a>Migrating from v20 to v21</h2>
+<ol>
+<li>
+<p><a href="../auth/trait.CustomAccountInterface.html#tymethod.__check_auth" title="associated function soroban_sdk::auth::CustomAccountInterface::__check_auth"><code>CustomAccountInterface::__check_auth</code></a> function <code>signature_payload</code> parameter changes from type <a href="../struct.BytesN.html" title="struct soroban_sdk::BytesN"><code>BytesN&lt;32&gt;</code></a> to <a href="../crypto/struct.Hash.html" title="struct soroban_sdk::crypto::Hash"><code>Hash&lt;32&gt;</code></a>.</p>
+<p>The two types are interchangeable. <a href="../crypto/struct.Hash.html" title="struct soroban_sdk::crypto::Hash"><code>Hash&lt;32&gt;</code></a> contains a <a href="../struct.BytesN.html" title="struct soroban_sdk::BytesN"><code>BytesN&lt;32&gt;</code></a> and can only be constructed in contexts where the value has been generated by a secure cryptographic function.</p>
+<p>To convert from a <a href="../crypto/struct.Hash.html" title="struct soroban_sdk::crypto::Hash"><code>Hash&lt;32&gt;</code></a> to a <a href="../struct.BytesN.html" title="struct soroban_sdk::BytesN"><code>BytesN&lt;32&gt;</code></a>, use <a href="../crypto/struct.Hash.html#method.to_bytes" title="method soroban_sdk::crypto::Hash::to_bytes"><code>Hash&lt;32&gt;::to_bytes</code></a> or <a href="https://doc.rust-lang.org/1.94.1/core/convert/trait.Into.html#tymethod.into" title="method core::convert::Into::into"><code>Into::into</code></a>.</p>
+<p>Current implementations of the interface will see a build error, and should change <a href="../struct.BytesN.html" title="struct soroban_sdk::BytesN"><code>BytesN&lt;32&gt;</code></a> to <a href="../crypto/struct.Hash.html" title="struct soroban_sdk::crypto::Hash"><code>Hash&lt;32&gt;</code></a>.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>soroban_sdk::{
+    auth::{Context, CustomAccountInterface}, contract,
+    contracterror, contractimpl, crypto::Hash, Env,
+    Vec,
+};
+
+<span class="attr">#[contract]
+</span><span class="kw">pub struct </span>Contract;
+
+<span class="attr">#[contracterror]
+</span><span class="kw">pub enum </span>Error {
+    AnError = <span class="number">1</span>,
+    <span class="comment">// ...
+</span>}
+
+<span class="attr">#[contractimpl]
+</span><span class="kw">impl </span>CustomAccountInterface <span class="kw">for </span>Contract {
+    <span class="kw">type </span>Signature = ();
+    <span class="kw">type </span>Error = Error;
+
+    <span class="kw">fn </span>__check_auth(
+        env: Env,
+        signature_payload: Hash&lt;<span class="number">32</span>&gt;, <span class="comment">// 👈 👀
+        </span>signatures: (),
+        auth_contexts: Vec&lt;Context&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), <span class="self">Self</span>::Error&gt; {
+        <span class="comment">// ...
+    </span>}
+}
+</code></pre></div></li>
+</ol>
+</div></details></section></div></main></body></html>

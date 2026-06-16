@@ -1,0 +1,5 @@
+D:\code\web3\Zuno\contracts\target\release\build\num-traits-8ff50e4cefc1af8a\build_script_build-8ff50e4cefc1af8a.d: C:\Users\mayur\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num-traits-0.2.19\build.rs
+
+D:\code\web3\Zuno\contracts\target\release\build\num-traits-8ff50e4cefc1af8a\build_script_build-8ff50e4cefc1af8a.exe: C:\Users\mayur\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num-traits-0.2.19\build.rs
+
+C:\Users\mayur\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\num-traits-0.2.19\build.rs:

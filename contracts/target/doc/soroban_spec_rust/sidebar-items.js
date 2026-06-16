@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["GenerateFromFileError"],"fn":["generate","generate_from_file","generate_from_wasm","generate_without_file"],"mod":["trait","types"],"trait":["ToFormattedString"]};

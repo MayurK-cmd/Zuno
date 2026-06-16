@@ -1,0 +1,93 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Deploy contains types for deploying contracts."><title>soroban_sdk::deploy - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-77263533.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="soroban_sdk" data-themes="" data-resource-suffix="" data-rustdoc-version="1.94.1 (e408947bf 2026-03-25)" data-channel="1.94.1" data-search-js="search-9e2438ea.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-c38705f0.js" ><script src="../../static.files/storage-e2aeef58.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../static.files/main-7bab91a1.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-ffcac47a.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module deploy</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../soroban_sdk/index.html">soroban_<wbr>sdk</a><span class="version">22.0.11</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module deploy</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#examples" title="Examples">Examples</a><ul><li><a href="#deploy-a-contract-without-constructor-or-0-argument-constructor" title="Deploy a contract without constructor (or 0-argument constructor)">Deploy a contract without constructor (or 0-argument constructor)</a></li><li><a href="#deploy-a-contract-with-a-multi-argument-constructor" title="Deploy a contract with a multi-argument constructor">Deploy a contract with a multi-argument constructor</a></li><li><a href="#derive-before-deployment-what-the-address-of-a-contract-will-be" title="Derive before deployment what the address of a contract will be">Derive before deployment what the address of a contract will be</a></li></ul></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="../index.html">In crate soroban_<wbr>sdk</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">soroban_sdk</a></div><h1>Module <span>deploy</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/soroban_sdk/deploy.rs.html#1-397">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Deploy contains types for deploying contracts.</p>
+<p>Contracts are assigned an ID that is derived from a set of arguments. A
+contract may choose which set of arguments to use to deploy with:</p>
+<ul>
+<li><a href="struct.Deployer.html#method.with_current_contract" title="method soroban_sdk::deploy::Deployer::with_current_contract">Deployer::with_current_contract</a> – A contract deployed by the currently
+executing contract will have an ID derived from the currently executing
+contract’s ID.</li>
+</ul>
+<p>The deployer can be created using <a href="../struct.Env.html#method.deployer" title="method soroban_sdk::Env::deployer">Env::deployer</a>.</p>
+<h4 id="examples"><a class="doc-anchor" href="#examples">§</a>Examples</h4><h5 id="deploy-a-contract-without-constructor-or-0-argument-constructor"><a class="doc-anchor" href="#deploy-a-contract-without-constructor-or-0-argument-constructor">§</a>Deploy a contract without constructor (or 0-argument constructor)</h5>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>soroban_sdk::{contract, contractimpl, BytesN, Env, Symbol};
+
+<span class="kw">const </span>DEPLOYED_WASM: <span class="kw-2">&amp;</span>[u8] = <span class="macro">include_bytes!</span>(<span class="string">"../doctest_fixtures/contract.wasm"</span>);
+
+<span class="attr">#[contract]
+</span><span class="kw">pub struct </span>Contract;
+
+<span class="attr">#[contractimpl]
+</span><span class="kw">impl </span>Contract {
+    <span class="kw">pub fn </span>deploy(env: Env, wasm_hash: BytesN&lt;<span class="number">32</span>&gt;) {
+        <span class="kw">let </span>salt = [<span class="number">0u8</span>; <span class="number">32</span>];
+        <span class="kw">let </span>deployer = env.deployer().with_current_contract(salt);
+        <span class="kw">let </span>contract_address = deployer.deploy_v2(wasm_hash, ());
+        <span class="comment">// ...
+    </span>}
+}
+
+<span class="attr">#[test]
+</span><span class="kw">fn </span>test() {
+    <span class="kw">let </span>env = Env::default();
+    <span class="kw">let </span>contract_address = env.register(Contract, ());
+    <span class="kw">let </span>contract = ContractClient::new(<span class="kw-2">&amp;</span>env, <span class="kw-2">&amp;</span>contract_address);
+    <span class="comment">// Upload the contract code before deploying its instance.
+    </span><span class="kw">let </span>wasm_hash = env.deployer().upload_contract_wasm(DEPLOYED_WASM);
+    contract.deploy(<span class="kw-2">&amp;</span>wasm_hash);
+}</code></pre></div><h5 id="deploy-a-contract-with-a-multi-argument-constructor"><a class="doc-anchor" href="#deploy-a-contract-with-a-multi-argument-constructor">§</a>Deploy a contract with a multi-argument constructor</h5>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>soroban_sdk::{contract, contractimpl, BytesN, Env, Symbol, IntoVal};
+
+<span class="kw">const </span>DEPLOYED_WASM_WITH_CTOR: <span class="kw-2">&amp;</span>[u8] = <span class="macro">include_bytes!</span>(<span class="string">"../doctest_fixtures/contract_with_constructor.wasm"</span>);
+
+<span class="attr">#[contract]
+</span><span class="kw">pub struct </span>Contract;
+
+<span class="attr">#[contractimpl]
+</span><span class="kw">impl </span>Contract {
+    <span class="kw">pub fn </span>deploy_with_constructor(env: Env, wasm_hash: BytesN&lt;<span class="number">32</span>&gt;) {
+        <span class="kw">let </span>salt = [<span class="number">1u8</span>; <span class="number">32</span>];
+        <span class="kw">let </span>deployer = env.deployer().with_current_contract(salt);
+        <span class="kw">let </span>contract_address = deployer.deploy_v2(
+             wasm_hash,
+             (<span class="number">1_u32</span>, <span class="number">2_i64</span>),
+        );
+        <span class="comment">// ...
+    </span>}
+}
+
+<span class="attr">#[test]
+</span><span class="kw">fn </span>test() {
+    <span class="kw">let </span>env = Env::default();
+    <span class="kw">let </span>contract_address = env.register(Contract, ());
+    <span class="kw">let </span>contract = ContractClient::new(<span class="kw-2">&amp;</span>env, <span class="kw-2">&amp;</span>contract_address);
+    <span class="comment">// Upload the contract code before deploying its instance.
+    </span><span class="kw">let </span>wasm_hash = env.deployer().upload_contract_wasm(DEPLOYED_WASM_WITH_CTOR);
+    contract.deploy_with_constructor(<span class="kw-2">&amp;</span>wasm_hash);
+}</code></pre></div><h5 id="derive-before-deployment-what-the-address-of-a-contract-will-be"><a class="doc-anchor" href="#derive-before-deployment-what-the-address-of-a-contract-will-be">§</a>Derive before deployment what the address of a contract will be</h5>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Symbol, IntoVal};
+
+<span class="attr">#[contract]
+</span><span class="kw">pub struct </span>Contract;
+
+<span class="attr">#[contractimpl]
+</span><span class="kw">impl </span>Contract {
+    <span class="kw">pub fn </span>deploy_contract_address(env: Env) -&gt; Address {
+        <span class="kw">let </span>salt = [<span class="number">1u8</span>; <span class="number">32</span>];
+        <span class="kw">let </span>deployer = env.deployer().with_current_contract(salt);
+        <span class="comment">// Deployed contract address is deterministic and can be accessed
+        // before deploying the contract. It is derived from the deployer
+        // (the current contract's address) and the salt passed in above.
+        </span>deployer.deployed_address()
+    }
+}
+
+<span class="attr">#[test]
+</span><span class="kw">fn </span>test() {
+    <span class="kw">let </span>env = Env::default();
+    <span class="kw">let </span>contract_address = env.register(Contract, ());
+    <span class="kw">let </span>contract = ContractClient::new(<span class="kw-2">&amp;</span>env, <span class="kw-2">&amp;</span>contract_address);
+    <span class="macro">assert_eq!</span>(
+        contract.deploy_contract_address(),
+        Address::from_str(<span class="kw-2">&amp;</span>env, <span class="string">"CBESJIMX7J53SWJGJ7WQ6QTLJI4S5LPPJNC2BNVD63GIKAYCDTDOO322"</span>),
+    );
+}</code></pre></div></div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Deployer.html" title="struct soroban_sdk::deploy::Deployer">Deployer</a></dt><dd>Deployer provides access to deploying contracts.</dd><dt><a class="struct" href="struct.DeployerWithAddress.html" title="struct soroban_sdk::deploy::DeployerWithAddress">Deployer<wbr>With<wbr>Address</a></dt><dd>A deployer that deploys a contract that has its ID derived from the provided
+address and salt.</dd><dt><a class="struct" href="struct.DeployerWithAsset.html" title="struct soroban_sdk::deploy::DeployerWithAsset">Deployer<wbr>With<wbr>Asset</a></dt></dl></section></div></main></body></html>

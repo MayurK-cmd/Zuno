@@ -1,45 +1,89 @@
-use anchor_lang::prelude::*;
+use soroban_sdk::contracterror;
 
-#[error_code]
+/// All errors that the Zuno contract can return.
+///
+/// Each variant maps to a u32 error code. Soroban does not have
+/// structured `#[msg(...)]` strings the way Anchor does — error context
+/// is emitted by the host environment. Keep this list in sync with the
+/// `ZunoError` variants referenced by the instruction handlers.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ZunoError {
-    #[msg("Not your turn")]
-    NotYourTurn,
-    #[msg("Game is not active")]
-    GameNotActive,
-    #[msg("Game is already full")]
-    GameFull,
-    #[msg("Game has already started")]
-    GameAlreadyStarted,
-    #[msg("Not enough players to start")]
-    NotEnoughPlayers,
-    #[msg("Only the host can perform this action")]
-    NotHost,
-    #[msg("Player is already in this room")]
-    AlreadyInRoom,
-    #[msg("ZK proof verification failed")]
-    InvalidProof,
-    #[msg("Turn deadline exceeded")]
-    TurnExpired,
-    #[msg("Turn deadline has not passed yet")]
-    TurnNotExpired,
-    #[msg("Must have exactly 2 cards to call Zuno")]
-    ZunoRequiresTwoCards,
-    #[msg("Must have 0 cards to claim victory")]
-    VictoryRequiresZeroCards,
-    #[msg("Player has already called Zuno")]
-    AlreadyCalledZuno,
-    #[msg("Player cannot punish themselves")]
-    CannotPunishSelf,
-    #[msg("Target player has called Zuno or has more than 1 card")]
-    PunishNotApplicable,
-    #[msg("Invalid card for this move")]
-    InvalidCard,
-    #[msg("Arithmetic overflow")]
-    Overflow,
-    #[msg("VRF result not ready")]
-    VrfNotReady,
-    #[msg("Invalid hand commitment")]
-    InvalidHandCommitment,
-    #[msg("Public input mismatch")]
-    PublicInputMismatch,
+    /// The action was attempted by an account that does not currently
+    /// hold the turn.
+    NotYourTurn = 1,
+
+    /// The room exists but its `status` is not `Active`.
+    GameNotActive = 2,
+
+    /// The room already has `MAX_PLAYERS` players.
+    GameFull = 3,
+
+    /// The room's `status` is not `Waiting` (game has already started
+    /// or finished).
+    GameAlreadyStarted = 4,
+
+    /// `start_game` was called with fewer than 2 players.
+    NotEnoughPlayers = 5,
+
+    /// A host-gated action was called by a non-host account.
+    NotHost = 6,
+
+    /// The player is already registered in the room.
+    AlreadyInRoom = 7,
+
+    /// The ZK proof failed to verify against the supplied public inputs.
+    InvalidProof = 8,
+
+    /// `play_card` / `draw_card` was called after the turn deadline
+    /// had already elapsed.
+    TurnExpired = 9,
+
+    /// `force_skip` was called before the turn deadline had elapsed.
+    TurnNotExpired = 10,
+
+    /// `call_zuno` was called when the player does not have exactly
+    /// 2 cards.
+    ZunoRequiresTwoCards = 11,
+
+    /// `claim_victory` was called when the player does not have 0 cards.
+    VictoryRequiresZeroCards = 12,
+
+    /// `call_zuno` was called twice for the same round.
+    AlreadyCalledZuno = 13,
+
+    /// `punish_zuno` was called with `caller == offender`.
+    CannotPunishSelf = 14,
+
+    /// `punish_zuno` was called against a player who has called Zuno
+    /// or has more than 1 card.
+    PunishNotApplicable = 15,
+
+    /// The played card does not match color, value, or wild against
+    /// the current top card.
+    InvalidCard = 16,
+
+    /// Arithmetic overflow / underflow on `pot`, `card_count`, etc.
+    Overflow = 17,
+
+    /// The commit-reveal seed has not been revealed yet
+    /// (kept for parity with the old `VrfNotReady` variant).
+    SeedNotReady = 18,
+
+    /// The supplied `hand_commitment` does not match the on-chain state.
+    InvalidHandCommitment = 19,
+
+    /// The public inputs supplied to the verifier contract do not match
+    /// the expected layout/length.
+    PublicInputMismatch = 20,
+
+    /// The host attempted to commit / reveal with a seed of the wrong
+    /// size.
+    InvalidSeed = 21,
+
+    /// The supplied room ID does not correspond to an existing room.
+    RoomNotFound = 22,
+
+    /// The Stellar token transfer (XLM stake / payout) failed.
+    TokenTransferFailed = 23,
 }

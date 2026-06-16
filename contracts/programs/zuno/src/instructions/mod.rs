@@ -1,21 +1,21 @@
+// `instructions::handler` is the only public name the lib.rs entry
+// point references. Each instruction file re-exports its own
+// `handler` via `pub fn handler(...)`; glob re-exports collide on the
+// shared name, so the per-module public paths are used directly:
+//
+//   instructions::initialize_room::handler
+//   instructions::play_card::handler
+//   ...
+//
+// No `pub use` globs here on purpose.
+
 pub mod call_zuno;
 pub mod claim_victory;
-pub mod consume_randomness;
 pub mod draw_card;
 pub mod force_skip;
 pub mod initialize_room;
 pub mod join_room;
 pub mod play_card;
 pub mod punish_zuno;
+pub mod reveal_randomness;
 pub mod start_game;
-
-pub use call_zuno::*;
-pub use claim_victory::*;
-pub use consume_randomness::*;
-pub use draw_card::*;
-pub use force_skip::*;
-pub use initialize_room::*;
-pub use join_room::*;
-pub use play_card::*;
-pub use punish_zuno::*;
-pub use start_game::*;
