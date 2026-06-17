@@ -1,0 +1,84 @@
+new_hand_hash = ""
+old_hand_hash = ""
+played_card_color = ""
+played_card_index = ""
+played_card_is_wild = ""
+played_card_value = ""
+salt = ""
+top_card_color = ""
+top_card_value = ""
+
+[[hand_array]]
+color = ""
+is_wild = ""
+value = ""
+
+[[hand_array]]
+color = ""
+is_wild = ""
+value = ""
+
+[[hand_array]]
+color = ""
+is_wild = ""
+value = ""
+
+[[hand_array]]
+color = ""
+is_wild = ""
+value = ""
+
+[[hand_array]]
+color = ""
+is_wild = ""
+value = ""
+
+[[hand_array]]
+color = ""
+is_wild = ""
+value = ""
+
+[[hand_array]]
+color = ""
+is_wild = ""
+value = ""
+
+[[hand_array]]
+color = ""
+is_wild = ""
+value = ""
+
+[[hand_array]]
+color = ""
+is_wild = ""
+value = ""
+
+[[hand_array]]
+color = ""
+is_wild = ""
+value = ""
+
+[[hand_array]]
+color = ""
+is_wild = ""
+value = ""
+
+[[hand_array]]
+color = ""
+is_wild = ""
+value = ""
+
+[[hand_array]]
+color = ""
+is_wild = ""
+value = ""
+
+[[hand_array]]
+color = ""
+is_wild = ""
+value = ""
+
+[[hand_array]]
+color = ""
+is_wild = ""
+value = ""

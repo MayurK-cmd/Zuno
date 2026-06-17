@@ -1,12 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { useWallet } from '@solana/wallet-adapter-react'
-import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
 import { Crown, LogOut, Plus, ShieldCheck, Users } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { truncateAddress } from '@/lib/solana'
+import { truncateAddress } from '@/lib/stellar'
+import { useWallet } from './wallet-context-provider'
+import { ConnectWalletButton } from './connect-wallet-button'
 import { WalletBalanceBadge } from './wallet-balance-badge'
 
 interface RoomLobbyProps {
@@ -107,7 +107,7 @@ export function RoomLobby({
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <WalletBalanceBadge />
-            <WalletMultiButton className="zuno-wallet-button min-h-10 rounded-lg border border-cyan-500/30 bg-slate-900/80 px-3 text-sm font-semibold text-cyan-100" />
+            <ConnectWalletButton compact className="min-h-10 rounded-lg border border-cyan-500/30 bg-slate-900/80 px-3 text-sm font-semibold text-cyan-100" />
             <Button
               type="button"
               onClick={onDisconnect}
@@ -175,7 +175,7 @@ export function RoomLobby({
                     htmlFor="room-buy-in"
                     className="mb-2 block text-sm text-slate-300"
                   >
-                    Buy-in (SOL)
+                    Buy-in (XLM)
                   </label>
                   <select
                     id="room-buy-in"
@@ -184,10 +184,10 @@ export function RoomLobby({
                     className="min-h-11 w-full rounded-lg border border-cyan-500/30 bg-slate-900/80 px-4 py-2 text-white focus-visible:border-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
                   >
                     <option value="0">Free Play</option>
-                    <option value="0.1">0.1 SOL</option>
-                    <option value="0.5">0.5 SOL</option>
-                    <option value="1.0">1.0 SOL</option>
-                    <option value="5.0">5.0 SOL</option>
+                    <option value="0.1">0.1 XLM</option>
+                    <option value="0.5">0.5 XLM</option>
+                    <option value="1.0">1.0 XLM</option>
+                    <option value="5.0">5.0 XLM</option>
                   </select>
                 </div>
                 <div className="flex gap-2">
@@ -260,7 +260,7 @@ export function RoomLobby({
                       </div>
                       <div className="flex items-baseline gap-2">
                         <span className="font-mono font-semibold tabular-nums text-yellow-300">
-                          {room.buyIn} SOL
+                          {room.buyIn} XLM
                         </span>
                         <span className="text-xs text-slate-400">buy-in</span>
                       </div>

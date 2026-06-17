@@ -1,12 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { useWallet } from '@solana/wallet-adapter-react'
-import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
 import { ShieldCheck, WalletCards } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { truncateAddress } from '@/lib/solana'
+import { truncateAddress } from '@/lib/stellar'
+import { useWallet } from './wallet-context-provider'
+import { ConnectWalletButton } from './connect-wallet-button'
 
 interface LandingScreenProps {
   onStart: (name: string) => void
@@ -70,7 +70,7 @@ export function LandingScreen({ onStart }: LandingScreenProps) {
             </div>
           </div>
           <p className="mt-4 text-base font-light text-slate-300 sm:text-lg">
-            Zero-knowledge UNO on Solana
+            Zero-knowledge UNO on Stellar
           </p>
         </div>
 
@@ -83,7 +83,7 @@ export function LandingScreen({ onStart }: LandingScreenProps) {
               <div>
                 <h2 className="text-2xl font-bold text-white">Connect to Play</h2>
                 <p className="mt-1 text-sm text-slate-300">
-                  Bind your Zuno identity to a Solana wallet before joining a
+                  Bind your Zuno identity to a Stellar wallet before joining a
                   table.
                 </p>
               </div>
@@ -94,13 +94,13 @@ export function LandingScreen({ onStart }: LandingScreenProps) {
                 <ShieldCheck className="size-4" aria-hidden="true" />
                 Wallet authentication
               </div>
-              <WalletMultiButton className="zuno-wallet-button min-h-11 w-full justify-center rounded-lg bg-gradient-to-r from-cyan-500 to-green-500 px-4 py-3 text-sm font-bold text-black motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:hover:scale-[1.02]" />
+              <ConnectWalletButton />
               <p className="mt-3 text-xs text-slate-400">
                 {connected && publicKey
                   ? `Connected: ${truncateAddress(publicKey)}`
                   : connecting
                     ? 'Waiting for your wallet approval...'
-                    : 'Phantom, Solflare, and wallet-standard providers are supported.'}
+                    : 'Freighter is the recommended Stellar wallet.'}
               </p>
             </div>
 
@@ -162,14 +162,14 @@ export function LandingScreen({ onStart }: LandingScreenProps) {
                 </div>
                 <div className="text-center">
                   <div className="text-2xl font-bold text-green-400">5,678</div>
-                  <div className="mt-1 text-xs text-slate-400">SOL Wagered</div>
+                  <div className="mt-1 text-xs text-slate-400">XLM Wagered</div>
                 </div>
               </div>
             </div>
           </div>
 
           <p className="mt-6 text-center text-xs text-slate-400">
-            Powered by Solana - zero-knowledge proofs - open source
+            Powered by Stellar - zero-knowledge proofs - open source
           </p>
         </div>
       </div>

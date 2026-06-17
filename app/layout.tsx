@@ -1,7 +1,6 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
-import '@solana/wallet-adapter-react-ui/styles.css'
 import './globals.css'
 import { Toaster } from '@/components/ui/toaster'
 import { WalletContextProvider } from '@/components/zuno/wallet-context-provider'
@@ -14,7 +13,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: 'Zuno',
-  description: 'Zero-knowledge UNO on Solana',
+  description: 'Zero-knowledge UNO on Stellar',
   generator: 'Zuno',
   icons: {
     icon: [

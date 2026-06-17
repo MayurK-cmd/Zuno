@@ -1,18 +1,21 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { useConnection, useWallet } from '@solana/wallet-adapter-react'
-import { LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { AlertTriangle, RefreshCw, Wallet } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatSolAmount } from '@/lib/solana'
+import { formatXlmAmount, getXlmBalance } from '@/lib/stellar'
+import { useWallet } from './wallet-context-provider'
 
 type BalanceState = 'idle' | 'loading' | 'ready' | 'error'
 
+/**
+ * XLM balance badge — the Stellar equivalent of the old SOL balance pill.
+ * Reads the native XLM balance (in stroops) via Horizon, formats it for
+ * display, and refreshes on demand.
+ */
 export function WalletBalanceBadge({ compact = false }: { compact?: boolean }) {
-  const { connection } = useConnection()
   const { connected, publicKey } = useWallet()
   const [balance, setBalance] = useState<number | null>(null)
   const [state, setState] = useState<BalanceState>('idle')
@@ -35,10 +38,10 @@ export function WalletBalanceBadge({ compact = false }: { compact?: boolean }) {
       setState('loading')
 
       try {
-        const lamports = await connection.getBalance(publicKey, 'confirmed')
+        const stroops = await getXlmBalance(publicKey)
 
         if (!cancelled) {
-          setBalance(lamports / LAMPORTS_PER_SOL)
+          setBalance(stroops)
           setState('ready')
         }
       } catch {
@@ -54,7 +57,7 @@ export function WalletBalanceBadge({ compact = false }: { compact?: boolean }) {
     return () => {
       cancelled = true
     }
-  }, [connected, connection, publicKey, refreshKey])
+  }, [connected, publicKey, refreshKey])
 
   if (!connected) {
     return (
@@ -83,7 +86,7 @@ export function WalletBalanceBadge({ compact = false }: { compact?: boolean }) {
           size="icon-sm"
           variant="ghost"
           onClick={refresh}
-          aria-label="Retry loading SOL balance"
+          aria-label="Retry loading XLM balance"
           className="text-red-100 hover:bg-red-400/10 hover:text-white"
         >
           <RefreshCw className="size-4" aria-hidden="true" />
@@ -96,16 +99,16 @@ export function WalletBalanceBadge({ compact = false }: { compact?: boolean }) {
     <div className="flex min-h-10 items-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 text-sm text-slate-100">
       <Wallet className="size-4 text-cyan-300" aria-hidden="true" />
       <span className="font-mono tabular-nums">
-        {formatSolAmount(balance ?? 0)}
+        {formatXlmAmount(balance ?? 0)}
       </span>
-      <span className="text-cyan-200">SOL</span>
+      <span className="text-cyan-200">XLM</span>
       {!compact && (
         <Button
           type="button"
           size="icon-sm"
           variant="ghost"
           onClick={refresh}
-          aria-label="Refresh SOL balance"
+          aria-label="Refresh XLM balance"
           className="text-cyan-100 hover:bg-cyan-400/10 hover:text-white"
         >
           <RefreshCw className="size-4" aria-hidden="true" />

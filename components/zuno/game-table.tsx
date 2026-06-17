@@ -1,8 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useWallet } from '@solana/wallet-adapter-react'
-import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
+import { useEffect, useMemo, useState } from 'react'
 import {
   ArrowLeft,
   MessageSquare,
@@ -20,7 +18,9 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { truncateAddress } from '@/lib/solana'
+import { truncateAddress } from '@/lib/stellar'
+import { useWallet } from './wallet-context-provider'
+import { ConnectWalletButton } from './connect-wallet-button'
 import { UNOCard } from './uno-card'
 import { WalletBalanceBadge } from './wallet-balance-badge'
 import { GameOverDialog } from './game-over-dialog'
@@ -72,6 +72,17 @@ export function GameTable({ playerName, roomId, onBack }: GameTableProps) {
   const showZunoButton = playerHand.length > 0 && playerHand.length <= 2
   const timerProgress = (turnTimer / TURN_LIMIT_SECONDS) * 100
 
+  // The `roomId` prop is currently a string slug (e.g. "room-001"). The
+  // contract expects a u64. We hash the slug to a deterministic u64 here
+  // so the same room id lands on the same on-chain room every time.
+  const numericRoomId = useMemo(() => {
+    let hash = 0
+    for (let i = 0; i < roomId.length; i++) {
+      hash = (hash * 31 + roomId.charCodeAt(i)) >>> 0
+    }
+    return hash || 1
+  }, [roomId])
+
   useEffect(() => {
     if (!activeOpponent || isProcessing || gameOutcome || turnTimer <= 0) return
 
@@ -94,7 +105,30 @@ export function GameTable({ playerName, roomId, onBack }: GameTableProps) {
     ])
 
     try {
-      const txHash = await runTransactionPipeline('Move confirmed')
+      const { txHash } = await runTransactionPipeline(
+        {
+          kind: 'play_card',
+          roomId: numericRoomId,
+          cardIndex: parseInt(card.id, 10) || 0,
+          playedColor: cardColorToInt(card.color),
+          playedValue: card.value ?? 0,
+          playedIsWild: card.type === 'wild' || card.type === 'wild-draw',
+          declaredColor: declaredColor
+            ? cardColorToInt(declaredColor)
+            : undefined,
+        },
+        {
+          successTitle: 'Move confirmed',
+          witness: {
+            handHash: '00',
+            salt: '00',
+            cardIndex: parseInt(card.id, 10) || 0,
+            playedColor: cardColorToInt(card.color),
+            playedValue: card.value ?? 0,
+            playedIsWild: card.type === 'wild' || card.type === 'wild-draw',
+          },
+        },
+      )
       const nextHand = playerHand.filter((handCard) => handCard.id !== card.id)
 
       setCurrentCard({
@@ -153,7 +187,18 @@ export function GameTable({ playerName, roomId, onBack }: GameTableProps) {
 
     setIsProcessing(true)
     try {
-      await runTransactionPipeline('Hand updated')
+      const slotIndex = playerHand.length
+      await runTransactionPipeline(
+        { kind: 'draw_card', roomId: numericRoomId, slotIndex },
+        {
+          successTitle: 'Hand updated',
+          witness: {
+            handHash: '00',
+            salt: '00',
+            cardIndex: slotIndex,
+          },
+        },
+      )
       setPlayerHand((previous) => [
         ...previous,
         {
@@ -176,7 +221,10 @@ export function GameTable({ playerName, roomId, onBack }: GameTableProps) {
 
     setIsProcessing(true)
     try {
-      await runTransactionPipeline('ZUNO locked')
+      await runTransactionPipeline(
+        { kind: 'call_zuno', roomId: numericRoomId },
+        { successTitle: 'ZUNO locked', witness: { handHash: '00', salt: '00', cardIndex: 0 } },
+      )
       setZunoCalled(true)
       setGameLog((previous) => [`${playerName} called ZUNO`, ...previous])
     } finally {
@@ -190,7 +238,17 @@ export function GameTable({ playerName, roomId, onBack }: GameTableProps) {
 
     setIsProcessing(true)
     try {
-      await runTransactionPipeline('Penalty confirmed')
+      await runTransactionPipeline(
+        {
+          kind: 'punish_zuno',
+          roomId: numericRoomId,
+          target: opponent.id, // TODO: replace with opponent's Stellar address once available
+        },
+        {
+          successTitle: 'Penalty confirmed',
+          witness: { handHash: '00', salt: '00', cardIndex: 0 },
+        },
+      )
       setOpponents((previous) =>
         previous.map((player) =>
           player.id === opponentId
@@ -222,7 +280,13 @@ export function GameTable({ playerName, roomId, onBack }: GameTableProps) {
 
     setIsProcessing(true)
     try {
-      await runTransactionPipeline('AFK skip confirmed')
+      await runTransactionPipeline(
+        { kind: 'force_skip', roomId: numericRoomId },
+        {
+          successTitle: 'AFK skip confirmed',
+          witness: { handHash: '00', salt: '00', cardIndex: 0 },
+        },
+      )
       setOpponents((previous) =>
         previous.map((opponent, index) => {
           if (opponent.id === activeOpponent.id) {
@@ -252,9 +316,15 @@ export function GameTable({ playerName, roomId, onBack }: GameTableProps) {
 
     setIsProcessing(true)
     try {
-      await runTransactionPipeline('Pot claimed')
+      await runTransactionPipeline(
+        { kind: 'claim_victory', roomId: numericRoomId },
+        {
+          successTitle: 'Pot claimed',
+          witness: { handHash: '00', salt: '00', cardIndex: 0 },
+        },
+      )
       setGameLog((previous) => [
-        `${playerName} claimed ${gameOutcome.pot} SOL`,
+        `${playerName} claimed ${gameOutcome.pot} XLM`,
         ...previous,
       ])
     } finally {
@@ -295,7 +365,7 @@ export function GameTable({ playerName, roomId, onBack }: GameTableProps) {
               </p>
             </div>
             <WalletBalanceBadge compact />
-            <WalletMultiButton className="zuno-wallet-button min-h-10 rounded-lg border border-cyan-500/30 bg-slate-900/80 px-3 text-sm font-semibold text-cyan-100" />
+            <ConnectWalletButton compact className="min-h-10 rounded-lg border border-cyan-500/30 bg-slate-900/80 px-3 text-sm font-semibold text-cyan-100" />
             <div className="flex min-h-10 items-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3">
               <Users className="size-4 text-cyan-300" aria-hidden="true" />
               <span className="text-sm text-slate-200">
@@ -342,7 +412,7 @@ export function GameTable({ playerName, roomId, onBack }: GameTableProps) {
               className="max-w-xs border border-cyan-500/30 bg-slate-950 text-slate-100"
             >
               Your cards are hashed locally. Only the cryptographic proof is
-              sent to Solana.
+              sent to Stellar.
             </TooltipContent>
           </Tooltip>
 
@@ -574,4 +644,23 @@ function CardPile({
       </div>
     </div>
   )
+}
+
+/**
+ * Map a card color to the on-chain integer encoding used by the Soroban
+ * contract (0=Red, 1=Green, 2=Blue, 3=Yellow, 4=Wild).
+ */
+function cardColorToInt(color: 'red' | 'green' | 'blue' | 'yellow' | 'wild'): number {
+  switch (color) {
+    case 'red':
+      return 0
+    case 'green':
+      return 1
+    case 'blue':
+      return 2
+    case 'yellow':
+      return 3
+    case 'wild':
+      return 4
+  }
 }

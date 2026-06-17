@@ -46,8 +46,8 @@ fn zero_card_at(hand: [CardStruct; 15], index: u32) -> [CardStruct; 15] {
     new_hand
 }
 
-// ── Public inputs (known to the verifier / on-chain program) ────────────────
-// ── Private inputs (known only to the prover / player) ──────────────────────
+// --- Public inputs (known to the verifier / on-chain program) ---
+// --- Private inputs (known only to the prover / player) ---
 fn main(
     // Public
     top_card_color:    pub Field,
@@ -86,7 +86,7 @@ fn main(
     assert(computed_new == new_hand_hash, "new hand hash mismatch");
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+// --- Tests ---
 #[test]
 fn test_valid_color_match() {
     // Hand: [Red-5, Blue-3, zeros...]  Playing Red-5 (index 0) on Red-7

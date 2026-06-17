@@ -17,7 +17,7 @@ fn hash_hand(hand: [CardStruct; 15], salt: Field) -> Field {
     Poseidon2::hash(fields, 46)
 }
 
-// Hash a single card — used to commit to a specific deck card without
+// Hash a single card -- used to commit to a specific deck card without
 // revealing it to the network. The deck_root is built from these hashes.
 fn hash_card(card: CardStruct) -> Field {
     Poseidon2::hash([card.color, card.value, card.is_wild], 3)
@@ -44,10 +44,10 @@ fn assert_slot_empty(hand: [CardStruct; 15], index: u32) {
     }
 }
 
-// ── Public inputs ────────────────────────────────────────────────────────────
-// ── Private inputs ───────────────────────────────────────────────────────────
+// --- Public inputs ---
+// --- Private inputs ---
 fn main(
-    // Public — verified against on-chain state
+    // Public -- verified against on-chain state
     old_hand_hash: pub Field,
     new_hand_hash: pub Field,
     deck_root:     pub Field,  // Merkle root of remaining deck (updated off-chain)
@@ -64,7 +64,7 @@ fn main(
 
     // 2. Verify the drawn card is in the deck (matches the declared card_hash)
     //    The client proves card_hash is a valid leaf in deck_root via a
-    //    Merkle membership proof — here we verify the card itself matches the hash.
+    //    Merkle membership proof -- here we verify the card itself matches the hash.
     let computed_card_hash = hash_card(drawn_card);
     assert(computed_card_hash == card_hash, "card hash mismatch");
 
@@ -83,7 +83,7 @@ fn main(
     let _ = deck_root;
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+// --- Tests ---
 #[test]
 fn test_valid_draw() {
     let mut hand: [CardStruct; 15] = [CardStruct { color: 0, value: 0, is_wild: 0 }; 15];

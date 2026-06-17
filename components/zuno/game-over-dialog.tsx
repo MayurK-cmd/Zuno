@@ -19,7 +19,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { truncateAddress } from '@/lib/solana'
+import { truncateAddress } from '@/lib/stellar'
+import { STELLAR_EXPERT_TX_URL } from '@/lib/stellar'
 import type { GameOutcome } from './game-types'
 
 export function GameOverDialog({
@@ -37,7 +38,7 @@ export function GameOverDialog({
 }) {
   if (!outcome) return null
 
-  const explorerUrl = `https://solscan.io/tx/${outcome.txHash}?cluster=devnet`
+  const explorerUrl = `${STELLAR_EXPERT_TX_URL}/${outcome.txHash}?network=testnet`
   const didWin = outcome.result === 'win'
 
   return (
@@ -56,12 +57,12 @@ export function GameOverDialog({
             )}
           </div>
           <DialogTitle className="bg-gradient-to-r from-cyan-300 to-green-300 bg-clip-text text-4xl font-black text-transparent">
-            {didWin ? `YOU WIN! +${outcome.pot} SOL` : `${outcome.winner} Wins`}
+            {didWin ? `YOU WIN! +${outcome.pot} XLM` : `${outcome.winner} Wins`}
           </DialogTitle>
           <DialogDescription className="mx-auto max-w-xl text-slate-300">
             {didWin
               ? 'The final hand commitment reached zero cards. Claim the settled pot back to your connected wallet.'
-              : `The pot closed at ${outcome.pot} SOL. Return to the lobby for a rematch.`}
+              : `The pot closed at ${outcome.pot} XLM. Return to the lobby for a rematch.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -69,7 +70,7 @@ export function GameOverDialog({
           <SettlementStat
             icon={<Sparkles className="size-4" aria-hidden="true" />}
             label="Final pot"
-            value={`${outcome.pot} SOL`}
+            value={`${outcome.pot} XLM`}
           />
           <SettlementStat
             icon={<CircleGauge className="size-4" aria-hidden="true" />}
