@@ -1,4 +1,4 @@
-use std::hash::poseidon2::Poseidon2;
+use poseidon::poseidon2::Poseidon2;
 
 struct CardStruct {
     color: Field,

@@ -5,3 +5,4 @@ authors = ["Zuno"]
 compiler_version = ">=0.36.0"
 
 [dependencies]
+poseidon = { git = "https://github.com/noir-lang/poseidon.git", tag = "v0.3.0" }

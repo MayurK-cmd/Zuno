@@ -1,4 +1,4 @@
-use std::hash::poseidon2::Poseidon2;
+use poseidon::poseidon2::Poseidon2;
 
 // Represents a single UNO card.
 // color: 0=Red, 1=Blue, 2=Green, 3=Yellow, 4=Wild
