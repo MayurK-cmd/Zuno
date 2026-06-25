@@ -35,7 +35,6 @@ export type PipelineAction =
       roomId: number
       stakeXlm: number
       xlmToken: string
-      verifierContract: string
       seedCommitmentHex: string
     }
   | { kind: 'join_room'; roomId: number }
@@ -44,13 +43,12 @@ export type PipelineAction =
   | {
       kind: 'play_card'
       roomId: number
-      cardIndex: number
       playedColor: number
       playedValue: number
       playedIsWild: boolean
       declaredColor?: number
     }
-  | { kind: 'draw_card'; roomId: number; slotIndex: number }
+  | { kind: 'draw_card'; roomId: number }
   | { kind: 'call_zuno'; roomId: number }
   | { kind: 'claim_victory'; roomId: number }
   | { kind: 'force_skip'; roomId: number }
@@ -107,6 +105,7 @@ export function useTransactionToasts() {
         // Only play_card and draw_card actually need a ZK proof. For
         // everything else we skip the worker to keep the UI snappy.
         let proofHex = '00'
+        let verifierSignatureHex = ''
         let publicInputs: string[] = []
 
         if (action.kind === 'play_card' || action.kind === 'draw_card') {
@@ -137,6 +136,7 @@ export function useTransactionToasts() {
             },
           )
           proofHex = result.proofHex
+          verifierSignatureHex = result.signatureHex
           publicInputs = result.publicInputs.fields
         } else {
           // No ZK proof required for this move — still display the
@@ -162,7 +162,13 @@ export function useTransactionToasts() {
           ),
         })
 
-        const result = await dispatchToContract(zuno, action, proofHex, publicInputs)
+        const result = await dispatchToContract(
+          zuno,
+          action,
+          proofHex,
+          publicInputs,
+          verifierSignatureHex,
+        )
 
         // ── Stage 3: success ─────────────────────────────────────────
         txToast.update({
@@ -228,6 +234,7 @@ async function dispatchToContract(
   action: PipelineAction,
   proofHex: string,
   publicInputs: string[],
+  verifierSignatureHex: string,
 ) {
   switch (action.kind) {
     case 'initialize_room':
@@ -235,7 +242,6 @@ async function dispatchToContract(
         roomId: action.roomId,
         stakeXlm: action.stakeXlm,
         xlmToken: action.xlmToken,
-        verifierContract: action.verifierContract,
         seedCommitmentHex: action.seedCommitmentHex,
       })
     case 'join_room':
@@ -252,15 +258,14 @@ async function dispatchToContract(
         roomId: action.roomId,
         proofHex,
         publicInputs,
-        playedCardIndex: action.cardIndex,
-        declaredColor: action.declaredColor,
+        verifierSignatureHex,
       })
     case 'draw_card':
       return zuno.drawCard({
         roomId: action.roomId,
         proofHex,
         publicInputs,
-        slotIndex: action.slotIndex,
+        verifierSignatureHex,
       })
     case 'call_zuno':
       return zuno.callZuno({ roomId: action.roomId })

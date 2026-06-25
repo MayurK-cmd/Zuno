@@ -109,7 +109,6 @@ export function GameTable({ playerName, roomId, onBack }: GameTableProps) {
         {
           kind: 'play_card',
           roomId: numericRoomId,
-          cardIndex: parseInt(card.id, 10) || 0,
           playedColor: cardColorToInt(card.color),
           playedValue: card.value ?? 0,
           playedIsWild: card.type === 'wild' || card.type === 'wild-draw',
@@ -189,7 +188,7 @@ export function GameTable({ playerName, roomId, onBack }: GameTableProps) {
     try {
       const slotIndex = playerHand.length
       await runTransactionPipeline(
-        { kind: 'draw_card', roomId: numericRoomId, slotIndex },
+        { kind: 'draw_card', roomId: numericRoomId },
         {
           successTitle: 'Hand updated',
           witness: {

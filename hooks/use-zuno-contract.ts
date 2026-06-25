@@ -28,7 +28,6 @@ export interface InitializeRoomArgs {
   roomId: number
   stakeXlm: number
   xlmToken: string
-  verifierContract: string
   seedCommitmentHex: string
 }
 
@@ -47,12 +46,12 @@ export interface RevealRandomnessArgs {
 
 export interface PlayCardArgs {
   roomId: number
-  /** Hex-encoded proof bytes. The stub verifier accepts anything. */
+  /** Hex-encoded proof bytes from the prover worker. */
   proofHex: string
   /** 7 public inputs as hex (32 bytes each). */
   publicInputs: string[]
-  playedCardIndex: number
-  declaredColor?: number
+  /** secp256k1 signature over the proof bytes, returned by the verifier server. */
+  verifierSignatureHex: string
 }
 
 export interface DrawCardArgs {
@@ -60,7 +59,8 @@ export interface DrawCardArgs {
   proofHex: string
   /** 4 public inputs as hex (32 bytes each). */
   publicInputs: string[]
-  slotIndex: number
+  /** secp256k1 signature over the proof bytes, returned by the verifier server. */
+  verifierSignatureHex: string
 }
 
 export interface CallZunoArgs {
@@ -135,16 +135,17 @@ export function useZunoContract() {
   // ── 1. initialize_room ──────────────────────────────────────────────
   const initializeRoom = useCallback(
     async (a: InitializeRoomArgs): Promise<TxResult> => {
+      if (!freighter.publicKey) throw new Error("Connect Freighter first")
       const stakeStroops = BigInt(Math.round(a.stakeXlm * STROOPS_PER_XLM))
       return invoke("initialize_room", [
+        nativeToScVal(freighter.publicKey, { type: "address" }),
         nativeToScVal(a.roomId, { type: "u64" }),
         nativeToScVal(stakeStroops, { type: "i128" }),
         nativeToScVal(a.xlmToken, { type: "address" }),
-        nativeToScVal(a.verifierContract, { type: "address" }),
         nativeToScVal(bytesFromHex(a.seedCommitmentHex), { type: "bytes" }),
       ])
     },
-    [invoke],
+    [invoke, freighter.publicKey],
   )
 
   // ── 2. join_room ────────────────────────────────────────────────────
@@ -192,15 +193,13 @@ export function useZunoContract() {
       const inputs = a.publicInputs.map((hex) =>
         nativeToScVal(bytesFromHex(hex), { type: "bytes" }),
       )
+      const verifierSig = bytesFromHex(a.verifierSignatureHex)
       return invoke("play_card", [
         nativeToScVal(freighter.publicKey, { type: "address" }),
         nativeToScVal(a.roomId, { type: "u64" }),
         nativeToScVal(proof, { type: "bytes" }),
         nativeToScVal(inputs),
-        nativeToScVal(a.playedCardIndex, { type: "u32" }),
-        ...(a.declaredColor !== undefined
-          ? [nativeToScVal(a.declaredColor, { type: "u32" })]
-          : []),
+        nativeToScVal(verifierSig, { type: "bytes" }),
       ])
     },
     [invoke, freighter.publicKey],
@@ -214,12 +213,13 @@ export function useZunoContract() {
       const inputs = a.publicInputs.map((hex) =>
         nativeToScVal(bytesFromHex(hex), { type: "bytes" }),
       )
+      const verifierSig = bytesFromHex(a.verifierSignatureHex)
       return invoke("draw_card", [
         nativeToScVal(freighter.publicKey, { type: "address" }),
         nativeToScVal(a.roomId, { type: "u64" }),
         nativeToScVal(proof, { type: "bytes" }),
         nativeToScVal(inputs),
-        nativeToScVal(a.slotIndex, { type: "u32" }),
+        nativeToScVal(verifierSig, { type: "bytes" }),
       ])
     },
     [invoke, freighter.publicKey],

@@ -12,7 +12,7 @@
 //!   - `error`     : `#[contracterror]` enum
 //!   - `constants` : non-state constants (penalties, dealing size)
 //!   - `instructions`: one file per game action
-
+//!
 #![no_std]
 
 use soroban_sdk::{contract, contractimpl, Address, Bytes, Env, Vec};
@@ -23,6 +23,21 @@ pub mod instructions;
 pub mod state;
 
 use crate::error::ZunoError;
+
+// Verifier public key (secp256k1, uncompressed 65 bytes)
+// Replace with the actual public key from the verifier server's private key
+// Format: 0x04 [x: 32 bytes] [y: 32 bytes]
+pub const VERIFIER_PUBLIC_KEY: [u8; 65] = [
+    0x04, 0xb7, 0x8c, 0x61, 0x54, 0x15, 0x08, 0xc6,
+    0x22, 0x77, 0xff, 0x0c, 0x23, 0x9e, 0xd1, 0x4e,
+    0xda, 0xbc, 0x4c, 0x44, 0xc0, 0x9c, 0xcd, 0x58,
+    0x8a, 0xee, 0xeb, 0xcd, 0xe6, 0x6c, 0x1e, 0x5d,
+    0x26, 0x7f, 0x4c, 0x8d, 0x0a, 0x0a, 0xe8, 0x61,
+    0x88, 0x5c, 0x47, 0xeb, 0x3f, 0x53, 0x10, 0x18,
+    0xa8, 0x59, 0x32, 0x3c, 0x2f, 0x19, 0xe4, 0x40,
+    0xe0, 0x5a, 0x05, 0x10, 0x05, 0x11, 0xac, 0x44,
+    0xe1
+];
 
 // ── Contract ────────────────────────────────────────────────────────────────
 
@@ -56,7 +71,6 @@ impl ZunoContract {
         room_id: u64,
         stake_amount: i128,
         xlm_token: Address,
-        verifier_contract: Address,
         seed_commitment: Bytes,
     ) -> Result<(), ZunoError> {
         instructions::initialize_room::handler(
@@ -65,7 +79,6 @@ impl ZunoContract {
             room_id,
             stake_amount,
             xlm_token,
-            verifier_contract,
             seed_commitment,
         )
     }
@@ -112,9 +125,8 @@ impl ZunoContract {
 
     // ── Per-turn actions (require ZK proofs) ────────────────────────────────
 
-    /// Play a card from the active player's hand. The proof is checked
-    /// against the on-chain `verifier_contract` (a BN254 verifier
-    /// deployed separately on Stellar Testnet). On success, the room's
+    /// Play a card from the active player's hand. The verifier signature
+    /// is checked against the verifier public key. On success, the room's
     /// `top_card` is updated, the player's `hand_commitment` is
     /// replaced, `card_count` is decremented, and the turn advances
     /// (with Skip / Reverse handling).
@@ -124,27 +136,28 @@ impl ZunoContract {
         room_id: u64,
         proof: Bytes,
         public_inputs: Vec<soroban_sdk::Val>,
+        verifier_signature: Bytes,
     ) -> Result<(), ZunoError> {
-        instructions::play_card::handler(env, player, room_id, proof, public_inputs)
+        instructions::play_card::handler(env, player, room_id, proof, public_inputs, verifier_signature)
     }
 
-    /// Draw a card from the deck. Proof verifies the new hand
-    /// commitment against the drawn card's hash and the deck root.
-    /// Increments `card_count`, clears `has_called_zuno`, advances turn.
+    /// Draw a card from the deck. The verifier signature is checked against the verifier public key.
+    /// On success, updates the hand commitment, increments `card_count`, clears `has_called_zuno`, advances turn.
     pub fn draw_card(
         env: Env,
         player: Address,
         room_id: u64,
         proof: Bytes,
         public_inputs: Vec<soroban_sdk::Val>,
+        verifier_signature: Bytes,
     ) -> Result<(), ZunoError> {
-        instructions::draw_card::handler(env, player, room_id, proof, public_inputs)
+        instructions::draw_card::handler(env, player, room_id, proof, public_inputs, verifier_signature)
     }
 
     // ── Status / punishment / forfeit ───────────────────────────────────────
 
     /// Declare "Zuno!" when you have exactly 2 cards. The contract
-    /// checks `card_count == 2` and that the player has not already
+    /// checks `card_count == 2 == 2` and that the player has not already
     /// called Zuno this round.
     pub fn call_zuno(
         env: Env,

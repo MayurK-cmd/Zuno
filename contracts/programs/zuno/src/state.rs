@@ -93,9 +93,6 @@ pub struct GameRoom {
     pub deck_root: BytesN<32>,
     pub turn_deadline: u64,       // ledger timestamp (seconds)
     pub flow_direction: i32,      // +1 normal, -1 reversed
-    /// Address of the deployed Soroban ZK verifier contract (BN254). Used
-    /// to invoke `verify(proof, public_inputs)` via `env.invoke_contract`.
-    pub verifier_contract: Address,
     /// Address of the Soroban token contract used for XLM stakes
     /// (typically the SAC for native XLM on Stellar).
     pub xlm_token: Address,

@@ -23,11 +23,10 @@
 //!      and advances the turn.
 //!   5. Resets the turn deadline and emits a `CardDrawn` event.
 
-use soroban_sdk::{Address, Bytes, BytesN, Env, Symbol, TryIntoVal, Val, Vec};
+use soroban_sdk::{Address, Bytes, BytesN, Env, Symbol, TryIntoVal, Val, Vec, crypto};
 
 use crate::error::ZunoError;
 use crate::state::{GameRoom, GameStatus, PlayerState, TURN_TIMEOUT_SECS};
-use crate::verifier::VerifierClient;
 
 const DRAW_CARD_PUBLIC_INPUTS_LEN: u32 = 4;
 const TOPIC_CARD_DRAWN: &str = "card_drawn";
@@ -36,11 +35,17 @@ pub fn handler(
     env: Env,
     player: Address,
     room_id: u64,
-    _proof: Bytes,
+    proof: Bytes,
     public_inputs: Vec<Val>,
+    verifier_signature: Bytes,
 ) -> Result<(), ZunoError> {
     // ── Auth: the active player authorises the draw ───────────────────
     player.require_auth();
+
+    // Verify the verifier signature on the proof
+    if !crypto::verify_signature_secp256k1(&crate::VERIFIER_PUBLIC_KEY, &proof, &verifier_signature) {
+        return Err(ZunoError::InvalidSignature);
+    }
 
     // ── Load state ────────────────────────────────────────────────────
     let mut room = GameRoom::load(&env, room_id).ok_or(ZunoError::RoomNotFound)?;
@@ -76,16 +81,7 @@ pub fn handler(
         return Err(ZunoError::PublicInputMismatch);
     }
 
-    // ── STUB: would call `env.invoke_contract` on the BN254 verifier ─
-    // PHASE 2: replace with the real verifier invocation:
-    //
-    //     let verifier_client = verifier::VerifierClient::new(&env, &room.verifier_contract);
-    //     verifier_client.try_verify(&proof, &public_inputs)?;
-    //
-    // For now we skip the invoke and trust the public-input shape check
-    // above. The actual ZK enforcement will land in Phase 2.
-    let _ = _proof;
-
+    
     // ── Apply the draw ────────────────────────────────────────────────
     ps.hand_commitment = new_hand_hash;
     ps.card_count = ps

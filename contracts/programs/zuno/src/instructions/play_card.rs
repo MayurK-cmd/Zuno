@@ -26,14 +26,13 @@
 //!      turn (with Skip / Reverse / DrawTwo effects).
 //!   5. Resets the turn deadline and emits a `CardPlayed` event.
 
-use soroban_sdk::{Address, Bytes, BytesN, Env, Symbol, TryIntoVal, Val, Vec};
+use soroban_sdk::{Address, Bytes, BytesN, Env, Symbol, TryIntoVal, Val, Vec, crypto};
 
 use crate::error::ZunoError;
 use crate::state::{
     Card, GameRoom, GameStatus, PlayerState, DRAW_TWO, REVERSE, SKIP, TURN_TIMEOUT_SECS,
     WILD_DRAW_FOUR,
 };
-use crate::verifier::VerifierClient;
 
 // `Card.value == 1` is a "wild with chosen color" (no separate
 // `is_wild` value — `is_wild` flag covers it).
@@ -44,11 +43,17 @@ pub fn handler(
     env: Env,
     player: Address,
     room_id: u64,
-    _proof: Bytes,
+    proof: Bytes,
     public_inputs: Vec<Val>,
+    verifier_signature: Bytes,
 ) -> Result<(), ZunoError> {
     // ── Auth: the active player authorises the move ────────────────────
     player.require_auth();
+
+    // Verify the verifier signature on the proof
+    if !crypto::verify_signature_secp256k1(&crate::VERIFIER_PUBLIC_KEY, &proof, &verifier_signature) {
+        return Err(ZunoError::InvalidSignature);
+    }
 
     // ── Load state ────────────────────────────────────────────────────
     let mut room = GameRoom::load(&env, room_id).ok_or(ZunoError::RoomNotFound)?;
@@ -110,7 +115,6 @@ pub fn handler(
     // verifier interface. For now we skip the invoke entirely; the
     // public-input shape check above is what the verifier would
     // ultimately enforce.
-    let _ = _proof; // suppress unused warning until the real invoke lands
 
     // ── Apply the move ────────────────────────────────────────────────
     room.top_card = Card {

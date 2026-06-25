@@ -35,6 +35,9 @@ pub enum ZunoError {
     /// The ZK proof failed to verify against the supplied public inputs.
     InvalidProof = 8,
 
+    /// The verifier signature is invalid.
+    InvalidSignature = 24,
+
     /// `play_card` / `draw_card` was called after the turn deadline
     /// had already elapsed.
     TurnExpired = 9,
@@ -86,4 +89,7 @@ pub enum ZunoError {
 
     /// The Stellar token transfer (XLM stake / payout) failed.
     TokenTransferFailed = 23,
+
+    /// The verifier signature is invalid.
+    InvalidSignature = 24,
 }

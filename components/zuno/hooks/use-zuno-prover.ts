@@ -31,6 +31,12 @@ export interface GeneratedProof {
   publicInputs: PublicInputs
 }
 
+export interface VerifiedProof {
+  proofHex: string
+  publicInputs: PublicInputs
+  signatureHex: string
+}
+
 export interface ProofGenerationCallbacks {
   onProgress?: (stage: ProverProgress["stage"], message: string) => void
 }
@@ -79,14 +85,14 @@ export function useZunoProver() {
 
   const generateProof = useCallback(
     (
-      action: ZkAction,
+      circuitName: ZkAction,
       witness: WitnessInput,
       callbacks: ProofGenerationCallbacks = {},
-    ): Promise<GeneratedProof> => {
+    ): Promise<VerifiedProof> => {
       const worker = ensureWorker()
       const requestId = `zk-${++requestCounterRef.current}-${Date.now()}`
 
-      return new Promise<GeneratedProof>((resolve, reject) => {
+      return new Promise<VerifiedProof>((resolve, reject) => {
         const handler = (event: MessageEvent<ProverResponse>) => {
           const msg = event.data
           if (!msg || msg.requestId !== requestId) return
@@ -99,7 +105,11 @@ export function useZunoProver() {
           worker.removeEventListener("message", handler)
           if (msg.type === "proof") {
             const ok = msg as ProverSuccess
-            resolve({ proofHex: ok.proofHex, publicInputs: ok.publicInputs })
+            resolve({
+              proofHex: ok.proofHex,
+              publicInputs: ok.publicInputs,
+              signatureHex: ok.signatureHex
+            })
           } else if (msg.type === "error") {
             const err = msg as ProverFailure
             reject(new Error(err.error))
@@ -111,7 +121,7 @@ export function useZunoProver() {
         const request: ProverRequest = {
           type: "generate_proof",
           requestId,
-          action,
+          circuitName,
           witness,
         }
         worker.postMessage(request)

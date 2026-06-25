@@ -23,7 +23,6 @@ pub fn handler(
     room_id: u64,
     stake_amount: i128,
     xlm_token: Address,
-    verifier_contract: Address,
     seed_commitment: Bytes,
 ) -> Result<(), ZunoError> {
     // ── Validate args ───────────────────────────────────────────────────
@@ -74,7 +73,6 @@ pub fn handler(
         deck_root: BytesN::from_array(&env, &[0u8; 32]),
         turn_deadline: 0,
         flow_direction: 1,
-        verifier_contract,
         xlm_token: xlm_token.clone(),
         commit_reveal_seed: Some(seed_bytes),
     };
@@ -148,7 +146,6 @@ mod tests {
     #[test]
     fn test_initialize_room_creates_room_with_host_first_player() {
         let (env, zuno_addr, token_addr, host) = setup_with_host();
-        let verifier = Address::generate(&env);
         let room_id: u64 = 1;
         let stake: i128 = 1_000_000; // 0.1 XLM
 
