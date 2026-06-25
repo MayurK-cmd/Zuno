@@ -93,9 +93,9 @@ const acirCache: Record<string, Uint8Array> = {}
 
 async function initializeNoir(circuitName: 'play_card' | 'draw_card'): Promise<Noir> {
   if (!noir) {
-    // Fetch the compiled circuit (circuit.json from nargo compile)
-    const circuitPath = new URL(`/circuits/${circuitName}/target/circuit.json`, import.meta.url)
-    const response = await fetch(circuitPath)
+    // Fetch the compiled circuit. Path is relative to the Next.js public/
+    // directory — served as a static asset, no build-time module resolution.
+    const response = await fetch(`/circuits/${circuitName}/target/circuit.json`)
     if (!response.ok) {
       throw new Error(`Failed to load circuit: ${response.status} ${response.statusText}`)
     }
@@ -191,7 +191,7 @@ async function generateProofInWorker(
   // Get the appropriate verification key by reading the file
   let vkBuffer: Uint8Array
   try {
-    const vkResponse = await fetch(`/circuits/${circuitName}/target/vk`)
+    const vkResponse = await fetch(`/circuits/${circuitName}/target/vk.bin`)
     if (!vkResponse.ok) {
       throw new Error(`Failed to load VK: ${vkResponse.status}`)
     }
