@@ -71,6 +71,7 @@ impl ZunoContract {
         room_id: u64,
         stake_amount: i128,
         xlm_token: Address,
+        verifier_contract: Address,
         seed_commitment: Bytes,
     ) -> Result<(), ZunoError> {
         instructions::initialize_room::handler(
@@ -79,6 +80,7 @@ impl ZunoContract {
             room_id,
             stake_amount,
             xlm_token,
+            verifier_contract,
             seed_commitment,
         )
     }

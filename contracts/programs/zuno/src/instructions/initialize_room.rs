@@ -23,6 +23,7 @@ pub fn handler(
     room_id: u64,
     stake_amount: i128,
     xlm_token: Address,
+    verifier_contract: Address,
     seed_commitment: Bytes,
 ) -> Result<(), ZunoError> {
     // ── Validate args ───────────────────────────────────────────────────
@@ -71,6 +72,7 @@ pub fn handler(
         current_turn: 0,
         top_card: placeholder_top,
         deck_root: BytesN::from_array(&env, &[0u8; 32]),
+        verifier_contract: verifier_contract.clone(),
         turn_deadline: 0,
         flow_direction: 1,
         xlm_token: xlm_token.clone(),
@@ -122,7 +124,7 @@ mod tests {
         let token_addr = sac.address();
 
         // Register our contract so we can run as it.
-        let zuno_addr = env.register_contract(None, ZunoContract);
+        let zuno_addr = env.register(ZunoContract, ());
         let host = Address::generate(&env);
 
         (env, zuno_addr, token_addr, host)
@@ -146,6 +148,7 @@ mod tests {
     #[test]
     fn test_initialize_room_creates_room_with_host_first_player() {
         let (env, zuno_addr, token_addr, host) = setup_with_host();
+        let verifier = Address::generate(&env);
         let room_id: u64 = 1;
         let stake: i128 = 1_000_000; // 0.1 XLM
 

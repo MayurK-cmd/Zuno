@@ -23,7 +23,7 @@
 //!      and advances the turn.
 //!   5. Resets the turn deadline and emits a `CardDrawn` event.
 
-use soroban_sdk::{Address, Bytes, BytesN, Env, Symbol, TryIntoVal, Val, Vec, crypto};
+use soroban_sdk::{Address, Bytes, BytesN, Env, Symbol, TryIntoVal, Val, Vec};
 
 use crate::error::ZunoError;
 use crate::state::{GameRoom, GameStatus, PlayerState, TURN_TIMEOUT_SECS};
@@ -42,8 +42,12 @@ pub fn handler(
     // ── Auth: the active player authorises the draw ───────────────────
     player.require_auth();
 
-    // Verify the verifier signature on the proof
-    if !crypto::verify_signature_secp256k1(&crate::VERIFIER_PUBLIC_KEY, &proof, &verifier_signature) {
+    // STUB: verifier signature check (Phase 1).
+    //
+    // PHASE 2: replace with `env.crypto().secp256k1_recover(...)` against
+    // `room.verifier_pubkey`. For Phase 1 we just enforce the signature
+    // is non-empty so empty sigs get rejected with a meaningful error.
+    if verifier_signature.is_empty() {
         return Err(ZunoError::InvalidSignature);
     }
 

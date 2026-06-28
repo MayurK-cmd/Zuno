@@ -26,8 +26,8 @@ pub fn handler(env: Env, player: Address, room_id: u64) -> Result<(), ZunoError>
     // Migration safeguard: if the original host address is missing from the players vec,
     // transfer host privileges to the next player (players[1] as per spec).
     if !room.players.contains(&room.host) {
-        if let Some(new_host) = room.players.get(1).cloned() {
-            room.host = new_host;
+        if let Some(new_host) = room.players.get(1) {
+            room.host = new_host.clone();
         }
     }
 
@@ -105,7 +105,7 @@ mod tests {
         let sac = env.register_stellar_asset_contract_v2(admin);
         let token_addr = sac.address();
 
-        let zuno_addr = env.register_contract(None, ZunoContract);
+        let zuno_addr = env.register(ZunoContract, ());
 
         let host = Address::generate(&env);
         let verifier = Address::generate(&env);

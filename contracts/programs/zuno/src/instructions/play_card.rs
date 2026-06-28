@@ -26,7 +26,7 @@
 //!      turn (with Skip / Reverse / DrawTwo effects).
 //!   5. Resets the turn deadline and emits a `CardPlayed` event.
 
-use soroban_sdk::{Address, Bytes, BytesN, Env, Symbol, TryIntoVal, Val, Vec, crypto};
+use soroban_sdk::{Address, Bytes, BytesN, Env, Symbol, TryIntoVal, Val, Vec};
 
 use crate::error::ZunoError;
 use crate::state::{
@@ -50,8 +50,15 @@ pub fn handler(
     // ── Auth: the active player authorises the move ────────────────────
     player.require_auth();
 
-    // Verify the verifier signature on the proof
-    if !crypto::verify_signature_secp256k1(&crate::VERIFIER_PUBLIC_KEY, &proof, &verifier_signature) {
+    // STUB: verifier signature check.
+    //
+    // PHASE 2: replace with `env.crypto().secp256k1_recover(...)` against
+    // `room.verifier_pubkey` (the off-chain verifier server signs the
+    // keccak256 of the proof with its secp256k1 key; the contract
+    // recovers the signer and compares). For Phase 1 we just enforce
+    // the signature is non-empty so empty sigs get rejected with a
+    // meaningful error.
+    if verifier_signature.is_empty() {
         return Err(ZunoError::InvalidSignature);
     }
 

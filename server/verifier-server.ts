@@ -13,7 +13,10 @@ type Response = express.Response;
 // __dirname equivalent in ES modules
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
-// Load environment variables from root .env file
+// Load environment variables. Prefer `server/.env` (where the
+// verifier private key lives); fall back to the repo-root `.env`
+// so dev workflows that share a single .env keep working.
+dotenv.config({ path: path.join(__dirname, '.env') });
 dotenv.config({ path: path.join(__dirname, '../../.env') });
 
 const app = express();
@@ -62,6 +65,11 @@ async function initializeBB(): Promise<Barretenberg> {
   }
   return bbInstance;
 }
+
+app.get('/',(req:Request, res:Response) => {
+  res.send("hello from the verfier server");
+})
+
 
 // POST endpoint for verifying play card proofs
 app.post('/api/verify-play-card', async (req: Request, res: Response) => {

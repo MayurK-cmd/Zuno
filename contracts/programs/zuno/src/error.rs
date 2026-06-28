@@ -89,7 +89,4 @@ pub enum ZunoError {
 
     /// The Stellar token transfer (XLM stake / payout) failed.
     TokenTransferFailed = 23,
-
-    /// The verifier signature is invalid.
-    InvalidSignature = 24,
 }

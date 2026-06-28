@@ -91,6 +91,11 @@ pub struct GameRoom {
     /// Poseidon2 / BN254 root of the deck's card-hash Merkle tree. The
     /// actual Merkle tree is reconstructed off-chain from public state.
     pub deck_root: BytesN<32>,
+    /// Address of the secp256k1 verifier server used for Phase 1. In
+    /// Phase 2 this becomes a Soroban contract that does on-chain BN254
+    /// proof verification. Stored per-room so the contract can be
+    /// rotated without redeploying the Zuno contract.
+    pub verifier_contract: Address,
     pub turn_deadline: u64,       // ledger timestamp (seconds)
     pub flow_direction: i32,      // +1 normal, -1 reversed
     /// Address of the Soroban token contract used for XLM stakes
@@ -219,7 +224,7 @@ mod tests {
     /// running.
     fn with_contract<F: FnOnce(&Env)>(f: F) {
         let env = Env::default();
-        let addr = env.register_contract(None, ZunoContract);
+        let addr = env.register(ZunoContract, ());
         env.as_contract(&addr, || f(&env));
     }
 
